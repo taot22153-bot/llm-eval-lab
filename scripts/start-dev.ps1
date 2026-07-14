@@ -67,6 +67,10 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw "Database migration failed."
     }
+    & $python -m llm_eval_lab.sample_suite
+    if ($LASTEXITCODE -ne 0) {
+        throw "Sample Evaluation Suite seed failed."
+    }
 
     $backend = Start-Process -FilePath $python -ArgumentList @(
         "-m", "uvicorn", "llm_eval_lab.main:app",

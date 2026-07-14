@@ -39,3 +39,49 @@ def test_migration_creates_application_versions_table():
 
     command.downgrade(config, "base")
     assert "application_versions" not in inspect(engine).get_table_names()
+
+
+def test_migration_creates_versioned_evaluation_suite_tables():
+    database_url = os.environ["TEST_DATABASE_URL"]
+    config = Config(BACKEND_ROOT / "alembic.ini")
+    config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
+    engine = create_engine(database_url)
+
+    with engine.begin() as connection:
+        connection.exec_driver_sql("DROP TABLE IF EXISTS test_cases")
+        connection.exec_driver_sql("DROP TABLE IF EXISTS evaluation_suites")
+        connection.exec_driver_sql("DROP TABLE IF EXISTS application_versions")
+        connection.exec_driver_sql("DROP TABLE IF EXISTS alembic_version")
+
+    command.upgrade(config, "head")
+
+    inspector = inspect(engine)
+    assert {"evaluation_suites", "test_cases"} <= set(inspector.get_table_names())
+    assert {column["name"] for column in inspector.get_columns("evaluation_suites")} == {
+        "id",
+        "slug",
+        "version",
+        "name",
+        "description",
+        "created_at",
+    }
+    assert {column["name"] for column in inspector.get_columns("test_cases")} == {
+        "id",
+        "suite_id",
+        "key",
+        "position",
+        "title",
+        "user_input",
+        "grounding_material",
+        "must_have_facts",
+        "forbidden_claims",
+        "test_type",
+        "severity",
+        "requires_human_review",
+    }
+    assert inspector.get_foreign_keys("test_cases")[0]["referred_table"] == "evaluation_suites"
+
+    command.downgrade(config, "base")
+    table_names = inspect(engine).get_table_names()
+    assert "evaluation_suites" not in table_names
+    assert "test_cases" not in table_names

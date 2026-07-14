@@ -1,6 +1,16 @@
 import { FormEvent, useEffect, useState } from "react";
-import { Box, Check, Clock3, Plus, RefreshCw, ShieldCheck } from "lucide-react";
+import {
+  Box,
+  Check,
+  Clock3,
+  Layers3,
+  ListChecks,
+  Plus,
+  RefreshCw,
+  ShieldCheck,
+} from "lucide-react";
 
+import EvaluationSuitesWorkspace from "./EvaluationSuitesWorkspace";
 import {
   ApplicationVersion,
   ApplicationVersionDraft,
@@ -123,6 +133,7 @@ function VersionCard({ version }: { version: ApplicationVersion }) {
 }
 
 export default function App() {
+  const [workspace, setWorkspace] = useState<"versions" | "suites">("versions");
   const [versions, setVersions] = useState<ApplicationVersion[]>([]);
   const [form, setForm] = useState<FormState>(initialForm);
   const [isLoading, setIsLoading] = useState(true);
@@ -202,6 +213,24 @@ export default function App() {
           </span>
           <span>LLM Eval Lab</span>
         </a>
+        <nav className="primary-navigation" aria-label="Primary">
+          <button
+            aria-current={workspace === "versions" ? "page" : undefined}
+            type="button"
+            onClick={() => setWorkspace("versions")}
+          >
+            <Layers3 aria-hidden="true" size={16} />
+            Application Versions
+          </button>
+          <button
+            aria-current={workspace === "suites" ? "page" : undefined}
+            type="button"
+            onClick={() => setWorkspace("suites")}
+          >
+            <ListChecks aria-hidden="true" size={16} />
+            Evaluation Suites
+          </button>
+        </nav>
         <div className="workspace-status">
           <span className="status-dot" />
           Local workspace
@@ -209,6 +238,9 @@ export default function App() {
       </header>
 
       <main>
+        {workspace === "suites" ? <EvaluationSuitesWorkspace /> : null}
+        {workspace === "versions" ? (
+          <>
         <div className="page-heading">
           <div>
             <p className="eyebrow">Configuration registry</p>
@@ -332,6 +364,8 @@ export default function App() {
             ))}
           </section>
         </div>
+          </>
+        ) : null}
       </main>
     </div>
   );

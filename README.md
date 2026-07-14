@@ -2,7 +2,7 @@
 
 Local-first quality and safety evaluation for LLM applications.
 
-> Status: active development. The first MySQL-backed Application Version workflow is implemented.
+> Status: active development. Application Versions and a versioned sample Evaluation Suite are implemented.
 
 ## Why this project
 
@@ -15,6 +15,8 @@ LLM Eval Lab is planned as a local Web console that compares a candidate applica
 - Create immutable Application Versions from the local Web console.
 - Persist and list Application Versions through FastAPI and MySQL.
 - Apply the schema with Alembic migrations.
+- Seed an idempotent, synthetic electronics-store Evaluation Suite with eight Test Cases.
+- Browse every Test Case and inspect its input, evidence, test type, severity, and review requirement.
 - Verify the workflow with backend integration tests and frontend interaction tests.
 - Run the same checks in GitHub Actions.
 
@@ -42,6 +44,17 @@ installs dependencies, and applies migrations. The Web console runs at
 `http://127.0.0.1:8000/docs`.
 
 No database credentials, API keys, model files, or runtime data are committed.
+
+The setup and start scripts both run the idempotent sample seed. To verify it directly,
+run the command twice; both runs should report the same eight-case suite:
+
+```powershell
+.\.venv\Scripts\python.exe -m llm_eval_lab.sample_suite
+.\.venv\Scripts\python.exe -m llm_eval_lab.sample_suite
+```
+
+Open the Web console, choose **Evaluation Suites**, and browse **Northstar Electronics
+Support v1** to inspect the complete synthetic evidence for each Test Case.
 
 ## Planned evaluation flow
 
