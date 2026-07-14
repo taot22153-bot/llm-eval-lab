@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_serializer
 
@@ -24,3 +25,38 @@ class ApplicationVersionRead(ApplicationVersionCreate):
         if value.tzinfo is None:
             value = value.replace(tzinfo=UTC)
         return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+class GroundingMaterialRead(BaseModel):
+    kind: Literal["product", "shipping", "return", "warranty"]
+    title: str
+    content: str
+
+
+class TestCaseRead(BaseModel):
+    id: str
+    key: str
+    position: int
+    title: str
+    user_input: str
+    grounding_material: list[GroundingMaterialRead]
+    must_have_facts: list[str]
+    forbidden_claims: list[str]
+    test_type: Literal["normal", "hallucination", "prompt_injection", "jailbreak"]
+    severity: Literal["normal", "important", "release_blocking"]
+    requires_human_review: bool
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class EvaluationSuiteSummary(BaseModel):
+    id: str
+    slug: str
+    version: int
+    name: str
+    description: str
+    test_case_count: int
+
+
+class EvaluationSuiteDetail(EvaluationSuiteSummary):
+    test_cases: list[TestCaseRead]

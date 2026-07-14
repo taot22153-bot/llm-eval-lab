@@ -151,6 +151,13 @@ Push-Location $projectRoot
 try {
     & $npm --prefix frontend ci
     & $venvPython -m alembic -c backend\alembic.ini upgrade head
+    if ($LASTEXITCODE -ne 0) {
+        throw "Database migration failed."
+    }
+    & $venvPython -m llm_eval_lab.sample_suite
+    if ($LASTEXITCODE -ne 0) {
+        throw "Sample Evaluation Suite seed failed."
+    }
 } finally {
     Pop-Location
 }
