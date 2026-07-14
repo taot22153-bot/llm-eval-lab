@@ -2,13 +2,46 @@
 
 Local-first quality and safety evaluation for LLM applications.
 
-> Status: design phase. The product scope and architecture decisions are documented; implementation has not started yet.
+> Status: active development. The first MySQL-backed Application Version workflow is implemented.
 
 ## Why this project
 
 Changing a model, system prompt, generation parameter, knowledge source, or tool can improve one behavior while silently breaking another. A single aggregate score is not enough to decide whether an LLM application is safe to release.
 
 LLM Eval Lab is planned as a local Web console that compares a candidate application version with a known baseline, surfaces regressions, and produces an explainable release decision.
+
+## Implemented now
+
+- Create immutable Application Versions from the local Web console.
+- Persist and list Application Versions through FastAPI and MySQL.
+- Apply the schema with Alembic migrations.
+- Verify the workflow with backend integration tests and frontend interaction tests.
+- Run the same checks in GitHub Actions.
+
+## Local setup on Windows
+
+Install the three prerequisites once:
+
+```powershell
+winget install --id Python.Python.3.12 --exact
+winget install --id OpenJS.NodeJS.LTS --exact
+winget install --id Oracle.MySQL --exact
+```
+
+Open a new PowerShell window in the repository and run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\setup-local.ps1
+powershell -ExecutionPolicy Bypass -File scripts\start-dev.ps1
+```
+
+The setup script creates an isolated MySQL instance at
+`%LOCALAPPDATA%\LLMEvalLab`, writes random local credentials to ignored files,
+installs dependencies, and applies migrations. The Web console runs at
+`http://127.0.0.1:5173`; FastAPI documentation runs at
+`http://127.0.0.1:8000/docs`.
+
+No database credentials, API keys, model files, or runtime data are committed.
 
 ## Planned evaluation flow
 

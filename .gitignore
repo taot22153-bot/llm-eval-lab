@@ -29,6 +29,8 @@ data/
 models/
 artifacts/
 logs/
+output/playwright/
+.playwright-cli/
 *.db
 *.sqlite
 *.sqlite3
