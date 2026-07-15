@@ -1,6 +1,23 @@
 import { GroundingMaterial } from "./evaluationSuites";
 
 export type ExecutionStatus = "pending" | "running" | "completed" | "failed";
+export type DeterministicCheckType = "must_have_fact" | "forbidden_claim";
+export type RegressionClassification = "new_regression" | "existing_failure";
+
+export interface DeterministicCheckOutcome {
+  check_type: DeterministicCheckType;
+  position: number;
+  rule: string;
+  passed: boolean;
+  matched_evidence: string | null;
+}
+
+export interface DeterministicEvaluation {
+  scorer_version: string;
+  passed: boolean;
+  regression_classification: RegressionClassification | null;
+  outcomes: DeterministicCheckOutcome[];
+}
 
 export interface TestCaseExecution {
   id: string;
@@ -9,6 +26,7 @@ export interface TestCaseExecution {
   test_case_id: string;
   test_case_key: string;
   test_case_title: string;
+  test_case_severity: "normal" | "important" | "release_blocking";
   status: ExecutionStatus;
   prompt_context: {
     system_prompt: string;
@@ -23,6 +41,7 @@ export interface TestCaseExecution {
   } | null;
   latency_ms: number | null;
   error: { code: string; message: string } | null;
+  deterministic_evaluation: DeterministicEvaluation | null;
   created_at: string;
   started_at: string | null;
   completed_at: string | null;

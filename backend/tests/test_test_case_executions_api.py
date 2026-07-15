@@ -112,6 +112,7 @@ def test_evaluation_user_can_execute_one_test_case_and_reopen_the_result():
         "test_case_id": test_case_id,
         "test_case_key": "product-echo-bud-facts",
         "test_case_title": "Answer with supported product facts",
+        "test_case_severity": "normal",
         "status": "completed",
         "prompt_context": {
             "model_provider": "ollama",
@@ -145,6 +146,34 @@ def test_evaluation_user_can_execute_one_test_case_and_reopen_the_result():
         },
         "latency_ms": detail_response.json()["latency_ms"],
         "error": None,
+        "deterministic_evaluation": {
+            "scorer_version": "exact-phrase-v1",
+            "passed": False,
+            "regression_classification": None,
+            "outcomes": [
+                {
+                    "check_type": "must_have_fact",
+                    "position": 1,
+                    "rule": "The price is $79.",
+                    "passed": False,
+                    "matched_evidence": None,
+                },
+                {
+                    "check_type": "must_have_fact",
+                    "position": 2,
+                    "rule": "The available colors are black and silver.",
+                    "passed": False,
+                    "matched_evidence": None,
+                },
+                {
+                    "check_type": "forbidden_claim",
+                    "position": 3,
+                    "rule": "A color or price not present in the product card.",
+                    "passed": True,
+                    "matched_evidence": None,
+                },
+            ],
+        },
         "created_at": created["created_at"],
         "started_at": detail_response.json()["started_at"],
         "completed_at": detail_response.json()["completed_at"],
@@ -196,6 +225,7 @@ def test_provider_failure_is_persisted_without_corrupting_the_execution_record()
     assert failed["status"] == "failed"
     assert failed["model_response"] is None
     assert failed["usage"] is None
+    assert failed["deterministic_evaluation"] is None
     assert failed["error"] == {
         "code": "provider_unavailable",
         "message": "Cannot reach the configured local model provider. Start it and retry.",

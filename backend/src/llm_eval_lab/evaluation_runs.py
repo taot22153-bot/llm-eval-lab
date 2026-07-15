@@ -9,9 +9,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from llm_eval_lab.database import SessionLocal, get_session
+from llm_eval_lab.deterministic_scoring import classify_candidate_regression
 from llm_eval_lab.model_provider import ModelProviderRegistry, get_model_provider_registry
 from llm_eval_lab.models import (
     ApplicationVersion,
+    DeterministicEvaluation,
     EvaluationRun,
     EvaluationSuite,
     TestCaseExecution,
@@ -30,14 +32,19 @@ ProviderRegistry = Annotated[ModelProviderRegistry, Depends(get_model_provider_r
 
 def _evaluation_run_statement():
     return select(EvaluationRun).options(
-            selectinload(EvaluationRun.baseline_version),
-            selectinload(EvaluationRun.candidate_version),
-            selectinload(EvaluationRun.evaluation_suite),
-            selectinload(EvaluationRun.executions).selectinload(
-                TestCaseExecution.application_version
-            ),
-            selectinload(EvaluationRun.executions).selectinload(TestCaseExecution.test_case),
-        )
+        selectinload(EvaluationRun.baseline_version),
+        selectinload(EvaluationRun.candidate_version),
+        selectinload(EvaluationRun.evaluation_suite),
+        selectinload(EvaluationRun.executions).selectinload(
+            TestCaseExecution.application_version
+        ),
+        selectinload(EvaluationRun.executions).selectinload(
+            TestCaseExecution.test_case
+        ),
+        selectinload(EvaluationRun.executions)
+        .selectinload(TestCaseExecution.deterministic_evaluation)
+        .selectinload(DeterministicEvaluation.outcomes),
+    )
 
 
 def _load_evaluation_run(session: Session, run_id: str) -> EvaluationRun | None:
@@ -54,6 +61,107 @@ def _progress(executions: list[TestCaseExecution]) -> dict[str, int]:
         "completed": counts["completed"],
         "failed": counts["failed"],
     }
+
+
+def _rule_counts(
+    executions: list[TestCaseExecution],
+    check_type: str,
+) -> dict[str, int]:
+    outcomes = [
+        outcome
+        for execution in executions
+        if execution.deterministic_evaluation is not None
+        for outcome in execution.deterministic_evaluation.outcomes
+        if outcome.check_type == check_type
+    ]
+    passed = sum(outcome.passed for outcome in outcomes)
+    return {"passed": passed, "failed": len(outcomes) - passed, "total": len(outcomes)}
+
+
+def _version_deterministic_summary(
+    executions: list[TestCaseExecution],
+) -> dict[str, Any]:
+    scored = [
+        execution
+        for execution in executions
+        if execution.deterministic_evaluation is not None
+    ]
+    passed = sum(
+        execution.deterministic_evaluation.passed
+        for execution in scored
+        if execution.deterministic_evaluation is not None
+    )
+    severity_failures = {"normal": 0, "important": 0, "release_blocking": 0}
+    for execution in scored:
+        evaluation = execution.deterministic_evaluation
+        if evaluation is not None and not evaluation.passed:
+            severity_failures[execution.test_case.severity] += 1
+    return {
+        "scored_test_cases": len(scored),
+        "passed_test_cases": passed,
+        "failed_test_cases": len(scored) - passed,
+        "correctness": _rule_counts(scored, "must_have_fact"),
+        "safety": _rule_counts(scored, "forbidden_claim"),
+        "severity_failures": severity_failures,
+    }
+
+
+def _deterministic_summary(executions: list[TestCaseExecution]) -> dict[str, Any]:
+    baseline = [execution for execution in executions if execution.version_role == "baseline"]
+    candidate = [execution for execution in executions if execution.version_role == "candidate"]
+    candidate_evaluations = [
+        execution.deterministic_evaluation
+        for execution in candidate
+        if execution.deterministic_evaluation is not None
+    ]
+    new_regressions_by_severity = {
+        "normal": 0,
+        "important": 0,
+        "release_blocking": 0,
+    }
+    for execution in candidate:
+        evaluation = execution.deterministic_evaluation
+        if (
+            evaluation is not None
+            and evaluation.regression_classification == "new_regression"
+        ):
+            new_regressions_by_severity[execution.test_case.severity] += 1
+    return {
+        "baseline": _version_deterministic_summary(baseline),
+        "candidate": _version_deterministic_summary(candidate),
+        "new_regressions": sum(
+            evaluation.regression_classification == "new_regression"
+            for evaluation in candidate_evaluations
+        ),
+        "new_regressions_by_severity": new_regressions_by_severity,
+        "existing_failures": sum(
+            evaluation.regression_classification == "existing_failure"
+            for evaluation in candidate_evaluations
+        ),
+    }
+
+
+def _classify_regressions(evaluation_run: EvaluationRun) -> None:
+    executions = {
+        (execution.test_case_id, execution.version_role): execution
+        for execution in evaluation_run.executions
+    }
+    for test_case_id in {execution.test_case_id for execution in evaluation_run.executions}:
+        baseline = executions.get((test_case_id, "baseline"))
+        candidate = executions.get((test_case_id, "candidate"))
+        if (
+            baseline is None
+            or candidate is None
+            or baseline.deterministic_evaluation is None
+            or candidate.deterministic_evaluation is None
+        ):
+            continue
+        candidate.deterministic_evaluation.regression_classification = (
+            classify_candidate_regression(
+                baseline.deterministic_evaluation.passed,
+                candidate.deterministic_evaluation.passed,
+            )
+        )
 
 
 def _evaluation_run_payload(evaluation_run: EvaluationRun) -> dict[str, Any]:
@@ -82,6 +190,7 @@ def _evaluation_run_payload(evaluation_run: EvaluationRun) -> dict[str, Any]:
         },
         "status": evaluation_run.status,
         "progress": _progress(ordered_executions),
+        "deterministic_summary": _deterministic_summary(ordered_executions),
         "executions": [
             {
                 **serialize_test_case_execution(execution),
@@ -129,6 +238,7 @@ def run_evaluation_run(run_id: str, provider_registry: ModelProviderRegistry) ->
         evaluation_run = _load_evaluation_run(session, run_id)
         if evaluation_run is None:
             return
+        _classify_regressions(evaluation_run)
         evaluation_run.status = "failed" if orchestration_failed else "completed"
         evaluation_run.completed_at = datetime.now(UTC)
         session.commit()

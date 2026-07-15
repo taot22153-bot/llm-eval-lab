@@ -322,6 +322,100 @@ select {
   border-color: #ecc1bc;
 }
 
+.deterministic-summary {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.regression-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid #ecc1bc;
+  border-radius: 6px;
+  background: #fff8f7;
+  padding: 10px 12px;
+  color: #6a3b35;
+  font-size: 12px;
+}
+
+.regression-summary > div,
+.regression-severity-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+
+.regression-severity-summary {
+  justify-content: flex-end;
+  font-size: 10px;
+}
+
+.regression-summary strong {
+  color: #9c3429;
+}
+
+.score-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.score-summary-card {
+  border: 1px solid #d9dfe5;
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 11px;
+}
+
+.score-summary-card__heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.score-summary-card__heading span,
+.severity-summary {
+  color: #667381;
+  font-size: 10px;
+}
+
+.score-summary-card dl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 10px 0 0;
+}
+
+.score-summary-card dl div {
+  border-left: 2px solid #dce3e9;
+  padding-left: 7px;
+}
+
+.score-summary-card dt {
+  color: #6a7683;
+  font-size: 9px;
+  font-weight: 750;
+  text-transform: uppercase;
+}
+
+.score-summary-card dd {
+  margin: 3px 0 0;
+  font-size: 14px;
+  font-weight: 750;
+}
+
+.severity-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin: 10px 0 0;
+}
+
 .comparison-columns {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -334,6 +428,15 @@ select {
   border-radius: 7px;
   background: #ffffff;
   padding: 16px;
+}
+
+.comparison-column__severity {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin: 7px 0 0;
+  color: #667381;
+  font-size: 10px;
 }
 
 .comparison-evidence-list {
@@ -394,6 +497,87 @@ select {
 
 .comparison-evidence__waiting {
   color: #75808c;
+}
+
+.comparison-evidence .test-case-severity {
+  margin-top: 4px;
+  color: #667381;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.deterministic-evaluation {
+  margin-top: 9px;
+  border-top: 1px solid #e5e9ed;
+  padding-top: 9px;
+}
+
+.deterministic-evaluation__status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 10px;
+}
+
+.deterministic-evaluation__status strong {
+  color: #9c3429;
+  text-transform: uppercase;
+}
+
+.rule-pass {
+  color: #176c49;
+}
+
+.rule-fail {
+  color: #9c3429;
+}
+
+.rule-evidence {
+  margin-top: 8px;
+  border-radius: 4px;
+  background: #f7f9fa;
+  padding: 8px;
+}
+
+.rule-evidence summary {
+  cursor: pointer;
+  color: #344b5e;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.rule-evidence__version {
+  margin: 7px 0 0;
+  color: #6a7683;
+  font-size: 9px;
+}
+
+.rule-evidence ol {
+  display: grid;
+  gap: 7px;
+  margin: 8px 0 0;
+  padding-left: 20px;
+}
+
+.rule-evidence li > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 10px;
+}
+
+.rule-evidence li p {
+  margin: 3px 0;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.rule-evidence li small {
+  color: #667381;
+  font-size: 9px;
+  overflow-wrap: anywhere;
 }
 
 .execution-form {
@@ -1036,13 +1220,27 @@ pre {
   .version-metadata,
   .execution-metrics,
   .comparison-controls,
-  .comparison-columns {
+  .comparison-columns,
+  .score-summary-grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .score-summary-card dl {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .comparison-progress {
     grid-template-columns: repeat(5, minmax(56px, 1fr));
     overflow-x: auto;
+  }
+
+  .regression-summary {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .regression-severity-summary {
+    justify-content: flex-start;
   }
 
   .page-heading {
