@@ -18,6 +18,10 @@ def test_migration_creates_application_versions_table():
     engine = create_engine(database_url)
 
     with engine.begin() as connection:
+        connection.exec_driver_sql("DROP TABLE IF EXISTS test_case_executions")
+        connection.exec_driver_sql("DROP TABLE IF EXISTS evaluation_runs")
+        connection.exec_driver_sql("DROP TABLE IF EXISTS test_cases")
+        connection.exec_driver_sql("DROP TABLE IF EXISTS evaluation_suites")
         connection.exec_driver_sql("DROP TABLE IF EXISTS application_versions")
         connection.exec_driver_sql("DROP TABLE IF EXISTS alembic_version")
 
@@ -48,6 +52,8 @@ def test_migration_creates_versioned_evaluation_suite_tables():
     engine = create_engine(database_url)
 
     with engine.begin() as connection:
+        connection.exec_driver_sql("DROP TABLE IF EXISTS test_case_executions")
+        connection.exec_driver_sql("DROP TABLE IF EXISTS evaluation_runs")
         connection.exec_driver_sql("DROP TABLE IF EXISTS test_cases")
         connection.exec_driver_sql("DROP TABLE IF EXISTS evaluation_suites")
         connection.exec_driver_sql("DROP TABLE IF EXISTS application_versions")
@@ -95,6 +101,7 @@ def test_migration_creates_persisted_test_case_executions():
 
     with engine.begin() as connection:
         connection.exec_driver_sql("DROP TABLE IF EXISTS test_case_executions")
+        connection.exec_driver_sql("DROP TABLE IF EXISTS evaluation_runs")
         connection.exec_driver_sql("DROP TABLE IF EXISTS test_cases")
         connection.exec_driver_sql("DROP TABLE IF EXISTS evaluation_suites")
         connection.exec_driver_sql("DROP TABLE IF EXISTS application_versions")
@@ -107,6 +114,8 @@ def test_migration_creates_persisted_test_case_executions():
         "id",
         "application_version_id",
         "test_case_id",
+        "evaluation_run_id",
+        "version_role",
         "status",
         "prompt_context",
         "model_response",
@@ -120,7 +129,57 @@ def test_migration_creates_persisted_test_case_executions():
     assert {
         foreign_key["referred_table"]
         for foreign_key in inspector.get_foreign_keys("test_case_executions")
-    } == {"application_versions", "test_cases"}
+    } == {"application_versions", "test_cases", "evaluation_runs"}
 
     command.downgrade(config, "base")
     assert "test_case_executions" not in inspect(engine).get_table_names()
+
+
+def test_migration_creates_paired_evaluation_runs():
+    database_url = os.environ["TEST_DATABASE_URL"]
+    config = Config(BACKEND_ROOT / "alembic.ini")
+    config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
+    engine = create_engine(database_url)
+
+    with engine.begin() as connection:
+        connection.exec_driver_sql("DROP TABLE IF EXISTS test_case_executions")
+        connection.exec_driver_sql("DROP TABLE IF EXISTS evaluation_runs")
+        connection.exec_driver_sql("DROP TABLE IF EXISTS test_cases")
+        connection.exec_driver_sql("DROP TABLE IF EXISTS evaluation_suites")
+        connection.exec_driver_sql("DROP TABLE IF EXISTS application_versions")
+        connection.exec_driver_sql("DROP TABLE IF EXISTS alembic_version")
+
+    command.upgrade(config, "head")
+
+    inspector = inspect(engine)
+    assert {column["name"] for column in inspector.get_columns("evaluation_runs")} == {
+        "id",
+        "baseline_version_id",
+        "candidate_version_id",
+        "evaluation_suite_id",
+        "status",
+        "created_at",
+        "started_at",
+        "completed_at",
+    }
+    assert {
+        foreign_key["referred_table"]
+        for foreign_key in inspector.get_foreign_keys("evaluation_runs")
+    } == {"application_versions", "evaluation_suites"}
+    assert {
+        constraint["name"] for constraint in inspector.get_check_constraints("evaluation_runs")
+    } >= {"ck_evaluation_run_status", "ck_evaluation_run_distinct_versions"}
+    assert {
+        constraint["name"]
+        for constraint in inspector.get_check_constraints("test_case_executions")
+    } >= {
+        "ck_test_case_execution_version_role",
+        "ck_test_case_execution_run_role_pair",
+    }
+    assert {
+        foreign_key["referred_table"]
+        for foreign_key in inspector.get_foreign_keys("test_case_executions")
+    } == {"application_versions", "test_cases", "evaluation_runs"}
+
+    command.downgrade(config, "base")
+    assert "evaluation_runs" not in inspect(engine).get_table_names()

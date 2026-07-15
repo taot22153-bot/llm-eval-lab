@@ -15,7 +15,7 @@ from llm_eval_lab.model_provider import (
     ModelRequest,
     get_model_provider_registry,
 )
-from llm_eval_lab.models import ApplicationVersion, TestCase, TestCaseExecution
+from llm_eval_lab.models import ApplicationVersion, EvaluationRun, TestCase, TestCaseExecution
 from llm_eval_lab.schemas import TestCaseExecutionCreate, TestCaseExecutionRead
 
 router = APIRouter(prefix="/api/test-case-executions", tags=["test case executions"])
@@ -43,7 +43,7 @@ def _load_execution(session: Session, execution_id: str) -> TestCaseExecution | 
     return session.scalar(statement)
 
 
-def _execution_payload(execution: TestCaseExecution) -> dict[str, Any]:
+def serialize_test_case_execution(execution: TestCaseExecution) -> dict[str, Any]:
     return {
         "id": execution.id,
         "application_version_id": execution.application_version_id,
@@ -61,6 +61,32 @@ def _execution_payload(execution: TestCaseExecution) -> dict[str, Any]:
         "started_at": execution.started_at,
         "completed_at": execution.completed_at,
     }
+
+
+def new_test_case_execution(
+    application_version: ApplicationVersion,
+    test_case: TestCase,
+    *,
+    evaluation_run: EvaluationRun | None = None,
+    version_role: str | None = None,
+) -> TestCaseExecution:
+    user_prompt = _build_user_prompt(test_case)
+    return TestCaseExecution(
+        application_version=application_version,
+        test_case=test_case,
+        evaluation_run=evaluation_run,
+        version_role=version_role,
+        status="pending",
+        prompt_context={
+            "model_provider": application_version.model_provider,
+            "model_name": application_version.model_name,
+            "system_prompt": application_version.system_prompt,
+            "generation_parameters": application_version.generation_parameters,
+            "grounding_material": test_case.grounding_material,
+            "user_input": test_case.user_input,
+            "user_prompt": user_prompt,
+        },
+    )
 
 
 def run_test_case_execution(
@@ -152,26 +178,12 @@ def create_test_case_execution(
             detail=f"Test Case {payload.test_case_id} was not found.",
         )
 
-    user_prompt = _build_user_prompt(test_case)
-    execution = TestCaseExecution(
-        application_version=application_version,
-        test_case=test_case,
-        status="pending",
-        prompt_context={
-            "model_provider": application_version.model_provider,
-            "model_name": application_version.model_name,
-            "system_prompt": application_version.system_prompt,
-            "generation_parameters": application_version.generation_parameters,
-            "grounding_material": test_case.grounding_material,
-            "user_input": test_case.user_input,
-            "user_prompt": user_prompt,
-        },
-    )
+    execution = new_test_case_execution(application_version, test_case)
     session.add(execution)
     session.commit()
     session.refresh(execution)
 
-    response = _execution_payload(execution)
+    response = serialize_test_case_execution(execution)
     background_tasks.add_task(run_test_case_execution, execution.id, provider_registry)
     return response
 
@@ -187,4 +199,4 @@ def get_test_case_execution(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Test Case Execution {execution_id} was not found.",
         )
-    return _execution_payload(execution)
+    return serialize_test_case_execution(execution)
