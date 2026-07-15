@@ -3,7 +3,7 @@
 Local-first quality and safety evaluation for LLM applications.
 
 > Status: active development. Application Versions, a versioned sample Evaluation Suite,
-> and persisted single-Test-Case execution through a provider-neutral model boundary are implemented.
+> provider-neutral Test Case execution, and persisted Baseline/Candidate Evaluation Runs are implemented.
 
 ## Why this project
 
@@ -20,6 +20,9 @@ LLM Eval Lab is planned as a local Web console that compares a candidate applica
 - Browse every Test Case and inspect its input, evidence, test type, severity, and review requirement.
 - Execute one selected Test Case against one Application Version and reopen the persisted response,
   lifecycle state, latency, usage metadata, or actionable provider failure.
+- Run the same Evaluation Suite against distinct Baseline and Candidate versions, track a stable
+  queued/running/completed/failed breakdown, and inspect both sides even when one case fails.
+- Reopen the Evaluation Runs workspace after a refresh and restore the latest persisted comparison.
 - Use local Ollama in the application while automated tests substitute a deterministic adapter behind
   the same provider-neutral boundary.
 - Verify the workflow with backend integration tests and frontend interaction tests.
@@ -81,6 +84,20 @@ In the Web console:
 
 The prompt context and runtime response remain in the local MySQL database and are not committed.
 Automated verification does not require Ollama or a model download.
+
+### Compare a Baseline and Candidate
+
+1. Create two immutable Application Versions. For the course-style prompt experiment, keep the model
+   and generation parameters the same, use the ordinary prompt as the Baseline, and use the
+   safety-hardened prompt as the Candidate.
+2. Choose **Evaluation Runs**, select both versions and **Northstar Electronics Support v1**, then
+   choose **Run comparison**.
+3. Confirm the five progress counters remain visible and each Test Case appears once in each version
+   column. Refresh the page, reopen **Evaluation Runs**, and confirm the latest comparison returns.
+
+An Evaluation Run reaches **completed** after every queued execution reaches a terminal state. Its
+individual executions may still be **failed**; those provider errors remain visible evidence instead
+of stopping or hiding the other results.
 
 ## Planned evaluation flow
 

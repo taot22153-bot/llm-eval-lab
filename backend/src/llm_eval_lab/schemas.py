@@ -102,3 +102,54 @@ class TestCaseExecutionRead(BaseModel):
         if value.tzinfo is None:
             value = value.replace(tzinfo=UTC)
         return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+class EvaluationRunCreate(BaseModel):
+    baseline_version_id: str
+    candidate_version_id: str
+    evaluation_suite_id: str
+
+
+class EvaluationRunVersionRead(BaseModel):
+    id: str
+    name: str
+
+
+class EvaluationRunSuiteRead(BaseModel):
+    id: str
+    slug: str
+    version: int
+    name: str
+
+
+class EvaluationRunProgressRead(BaseModel):
+    total: int
+    queued: int
+    running: int
+    completed: int
+    failed: int
+
+
+class EvaluationRunExecutionRead(TestCaseExecutionRead):
+    version_role: Literal["baseline", "candidate"]
+
+
+class EvaluationRunRead(BaseModel):
+    id: str
+    baseline_version: EvaluationRunVersionRead
+    candidate_version: EvaluationRunVersionRead
+    evaluation_suite: EvaluationRunSuiteRead
+    status: Literal["pending", "running", "completed", "failed"]
+    progress: EvaluationRunProgressRead
+    executions: list[EvaluationRunExecutionRead]
+    created_at: datetime
+    started_at: datetime | None
+    completed_at: datetime | None
+
+    @field_serializer("created_at", "started_at", "completed_at")
+    def serialize_datetime(self, value: datetime | None) -> str | None:
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=UTC)
+        return value.astimezone(UTC).isoformat().replace("+00:00", "Z")

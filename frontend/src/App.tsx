@@ -3,6 +3,7 @@ import {
   Box,
   Check,
   Clock3,
+  GitCompareArrows,
   Layers3,
   ListChecks,
   Plus,
@@ -12,6 +13,7 @@ import {
 } from "lucide-react";
 
 import EvaluationSuitesWorkspace from "./EvaluationSuitesWorkspace";
+import EvaluationRunsWorkspace from "./EvaluationRunsWorkspace";
 import TestExecutionWorkspace from "./TestExecutionWorkspace";
 import {
   ApplicationVersion,
@@ -135,7 +137,9 @@ function VersionCard({ version }: { version: ApplicationVersion }) {
 }
 
 export default function App() {
-  const [workspace, setWorkspace] = useState<"versions" | "suites" | "execution">("versions");
+  const [workspace, setWorkspace] = useState<
+    "versions" | "suites" | "execution" | "runs"
+  >("versions");
   const [versions, setVersions] = useState<ApplicationVersion[]>([]);
   const [form, setForm] = useState<FormState>(initialForm);
   const [isLoading, setIsLoading] = useState(true);
@@ -240,6 +244,14 @@ export default function App() {
             <Play aria-hidden="true" size={16} />
             Test Case Execution
           </button>
+          <button
+            aria-current={workspace === "runs" ? "page" : undefined}
+            type="button"
+            onClick={() => setWorkspace("runs")}
+          >
+            <GitCompareArrows aria-hidden="true" size={16} />
+            Evaluation Runs
+          </button>
         </nav>
         <div className="workspace-status">
           <span className="status-dot" />
@@ -250,6 +262,7 @@ export default function App() {
       <main>
         {workspace === "suites" ? <EvaluationSuitesWorkspace /> : null}
         {workspace === "execution" ? <TestExecutionWorkspace versions={versions} /> : null}
+        {workspace === "runs" ? <EvaluationRunsWorkspace versions={versions} /> : null}
         {workspace === "versions" ? (
           <>
         <div className="page-heading">

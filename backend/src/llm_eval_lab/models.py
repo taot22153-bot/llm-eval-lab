@@ -89,12 +89,67 @@ class TestCase(Base):
     suite: Mapped[EvaluationSuite] = relationship(back_populates="test_cases")
 
 
+class EvaluationRun(Base):
+    __tablename__ = "evaluation_runs"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'running', 'completed', 'failed')",
+            name="ck_evaluation_run_status",
+        ),
+        CheckConstraint(
+            "baseline_version_id <> candidate_version_id",
+            name="ck_evaluation_run_distinct_versions",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    baseline_version_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("application_versions.id", ondelete="RESTRICT"),
+    )
+    candidate_version_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("application_versions.id", ondelete="RESTRICT"),
+    )
+    evaluation_suite_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("evaluation_suites.id", ondelete="RESTRICT"),
+    )
+    status: Mapped[str] = mapped_column(String(24), default="pending")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+    )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    baseline_version: Mapped[ApplicationVersion] = relationship(
+        foreign_keys=[baseline_version_id]
+    )
+    candidate_version: Mapped[ApplicationVersion] = relationship(
+        foreign_keys=[candidate_version_id]
+    )
+    evaluation_suite: Mapped[EvaluationSuite] = relationship()
+    executions: Mapped[list[TestCaseExecution]] = relationship(
+        back_populates="evaluation_run",
+        cascade="all, delete-orphan",
+    )
+
+
 class TestCaseExecution(Base):
     __tablename__ = "test_case_executions"
     __table_args__ = (
         CheckConstraint(
             "status IN ('pending', 'running', 'completed', 'failed')",
             name="ck_test_case_execution_status",
+        ),
+        CheckConstraint(
+            "version_role IS NULL OR version_role IN ('baseline', 'candidate')",
+            name="ck_test_case_execution_version_role",
+        ),
+        CheckConstraint(
+            "(evaluation_run_id IS NULL AND version_role IS NULL) OR "
+            "(evaluation_run_id IS NOT NULL AND version_role IS NOT NULL)",
+            name="ck_test_case_execution_run_role_pair",
         ),
     )
 
@@ -107,6 +162,12 @@ class TestCaseExecution(Base):
         String(36),
         ForeignKey("test_cases.id", ondelete="RESTRICT"),
     )
+    evaluation_run_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("evaluation_runs.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    version_role: Mapped[str | None] = mapped_column(String(24), nullable=True)
     status: Mapped[str] = mapped_column(String(24), default="pending")
     prompt_context: Mapped[dict[str, Any]] = mapped_column(JSON)
     model_response: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -121,3 +182,4 @@ class TestCaseExecution(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     application_version: Mapped[ApplicationVersion] = relationship()
     test_case: Mapped[TestCase] = relationship()
+    evaluation_run: Mapped[EvaluationRun | None] = relationship(back_populates="executions")
