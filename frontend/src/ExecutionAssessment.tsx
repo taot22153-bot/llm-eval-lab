@@ -11,7 +11,13 @@ export function reviewReasonLabel(reason: HumanReviewReason): string {
   return labels[reason];
 }
 
-export default function ExecutionAssessment({ execution }: { execution: TestCaseExecution }) {
+export default function ExecutionAssessment({
+  execution,
+  showAllDeterministicEvidence = false,
+}: {
+  execution: TestCaseExecution;
+  showAllDeterministicEvidence?: boolean;
+}) {
   const deterministicEvaluation = execution.deterministic_evaluation ?? null;
   const semanticEvaluation = execution.semantic_evaluation ?? null;
   const humanReviewItem = execution.human_review_item ?? null;
@@ -31,14 +37,15 @@ export default function ExecutionAssessment({ execution }: { execution: TestCase
             </span>
             {regressionLabel ? <strong>{regressionLabel}</strong> : null}
           </div>
-          {!deterministicEvaluation.passed || regressionLabel ? (
-            <details className="rule-evidence">
+          {showAllDeterministicEvidence || !deterministicEvaluation.passed || regressionLabel ? (
+            <details className="rule-evidence" open={showAllDeterministicEvidence}>
               <summary>Inspect rule evidence</summary>
               <p className="rule-evidence__version">
                 Scorer {deterministicEvaluation.scorer_version}
               </p>
-              <ol>
-                {deterministicEvaluation.outcomes.map((outcome) => (
+              {deterministicEvaluation.outcomes.length > 0 ? (
+                <ol>
+                  {deterministicEvaluation.outcomes.map((outcome) => (
                   <li key={`${outcome.check_type}-${outcome.position}`}>
                     <div>
                       <strong>
@@ -55,8 +62,11 @@ export default function ExecutionAssessment({ execution }: { execution: TestCase
                         : "No matching evidence found."}
                     </small>
                   </li>
-                ))}
-              </ol>
+                  ))}
+                </ol>
+              ) : (
+                <p>No deterministic rules were configured for this Test Case.</p>
+              )}
             </details>
           ) : null}
         </div>
@@ -93,9 +103,14 @@ export default function ExecutionAssessment({ execution }: { execution: TestCase
       ) : null}
       {humanReviewItem ? (
         <div className={`human-review-state human-review-state--${humanReviewItem.status}`}>
-          <strong>
-            {humanReviewItem.status === "pending" ? "Pending human review" : "Human review resolved"}
-          </strong>
+          <div>
+            <strong>
+              {humanReviewItem.status === "pending"
+                ? "Pending human review"
+                : `Human review ${humanReviewItem.outcome}`}
+            </strong>
+            {humanReviewItem.rationale ? <p>{humanReviewItem.rationale}</p> : null}
+          </div>
           <span>{humanReviewItem.reasons.map(reviewReasonLabel).join(" · ")}</span>
         </div>
       ) : null}

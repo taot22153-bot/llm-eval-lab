@@ -268,6 +268,8 @@ def test_migration_creates_semantic_judgments_and_human_review_queue_items():
         "test_case_execution_id",
         "status",
         "reasons",
+        "outcome",
+        "rationale",
         "created_at",
         "resolved_at",
     }
@@ -285,6 +287,14 @@ def test_migration_creates_semantic_judgments_and_human_review_queue_items():
         constraint["name"]
         for constraint in inspector.get_unique_constraints("human_review_items")
     } >= {"uq_human_review_item_execution"}
+    assert {
+        constraint["name"]
+        for constraint in inspector.get_check_constraints("human_review_items")
+    } >= {
+        "ck_human_review_item_status",
+        "ck_human_review_item_outcome",
+        "ck_human_review_item_decision_state",
+    }
 
     command.downgrade(config, "base")
     table_names = inspect(engine).get_table_names()

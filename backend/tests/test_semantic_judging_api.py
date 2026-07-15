@@ -174,6 +174,8 @@ def test_conflict_persists_semantic_evidence_without_overwriting_deterministic_e
             "version_role": None,
             "status": "pending",
             "reasons": ["automatic_conflict"],
+            "outcome": None,
+            "rationale": None,
             "created_at": execution["human_review_item"]["created_at"],
             "resolved_at": None,
         }
@@ -194,3 +196,93 @@ def test_judge_failure_cannot_silently_become_a_passing_score():
         "message": "Cannot reach the configured local semantic judge.",
     }
     assert execution["human_review_item"]["reasons"] == ["judge_failure"]
+
+
+def test_reviewer_can_inspect_resolve_and_reopen_a_human_review_without_overwriting_scores():
+    execution = execute_and_reopen(ConflictingSemanticJudge())
+    review_id = execution["human_review_item"]["id"]
+
+    with TestClient(app) as client:
+        detail_response = client.get(f"/api/human-review-items/{review_id}")
+        invalid_response = client.patch(
+            f"/api/human-review-items/{review_id}",
+            json={"outcome": "pass", "rationale": ""},
+        )
+        resolved_response = client.patch(
+            f"/api/human-review-items/{review_id}",
+            json={
+                "outcome": "pass",
+                "rationale": "The answer is supported when judged by meaning, not exact phrasing.",
+            },
+        )
+        duplicate_response = client.patch(
+            f"/api/human-review-items/{review_id}",
+            json={
+                "outcome": "fail",
+                "rationale": "A later request must not rewrite the completed review.",
+            },
+        )
+        pending_response = client.get("/api/human-review-items?status=pending")
+        resolved_history_response = client.get(
+            "/api/human-review-items?status=resolved"
+        )
+        execution_response = client.get(
+            f"/api/test-case-executions/{execution['id']}"
+        )
+
+    assert detail_response.status_code == 200
+    detail = detail_response.json()
+    assert detail["reasons"] == ["automatic_conflict"]
+    assert detail["outcome"] is None
+    assert detail["rationale"] is None
+    assert detail["execution"]["prompt_context"]["user_input"] == (
+        "What colors does the EchoBud X1 come in, and what does it cost?"
+    )
+    assert detail["execution"]["prompt_context"]["grounding_material"]
+    assert detail["execution"]["model_response"] == (
+        "The price is $79. The available colors are black and silver."
+    )
+    assert detail["execution"]["deterministic_evaluation"]["passed"] is True
+    assert detail["execution"]["semantic_evaluation"]["outcome"] == "fail"
+
+    assert invalid_response.status_code == 422
+    assert resolved_response.status_code == 200
+    resolved = resolved_response.json()
+    assert resolved["status"] == "resolved"
+    assert resolved["outcome"] == "pass"
+    assert resolved["rationale"] == (
+        "The answer is supported when judged by meaning, not exact phrasing."
+    )
+    assert resolved["resolved_at"].endswith("Z")
+    assert duplicate_response.status_code == 409
+    assert pending_response.json() == []
+    assert resolved_history_response.status_code == 200
+    assert resolved_history_response.json()[0]["id"] == review_id
+    assert resolved_history_response.json()[0]["outcome"] == "pass"
+
+    persisted_execution = execution_response.json()
+    assert persisted_execution["deterministic_evaluation"] == execution[
+        "deterministic_evaluation"
+    ]
+    assert persisted_execution["semantic_evaluation"] == execution[
+        "semantic_evaluation"
+    ]
+    assert persisted_execution["human_review_item"]["outcome"] == "pass"
+    assert persisted_execution["human_review_item"]["rationale"] == resolved[
+        "rationale"
+    ]
+
+
+def test_human_review_patch_is_allowed_from_the_local_web_console():
+    with TestClient(app) as client:
+        response = client.options(
+            "/api/human-review-items/review-id",
+            headers={
+                "Origin": "http://localhost:5173",
+                "Access-Control-Request-Method": "PATCH",
+                "Access-Control-Request-Headers": "content-type",
+            },
+        )
+
+    assert response.status_code == 200
+    assert "PATCH" in response.headers["access-control-allow-methods"]

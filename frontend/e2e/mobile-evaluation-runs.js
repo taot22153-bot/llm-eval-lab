@@ -78,7 +78,15 @@ async (page) => {
       scorer_version: "exact-phrase-v1",
       passed: true,
       regression_classification: null,
-      outcomes: [],
+      outcomes: [
+        {
+          check_type: "must_have_fact",
+          position: 1,
+          rule: "Persisted response evidence.",
+          passed: true,
+          matched_evidence: "Persisted response evidence.",
+        },
+      ],
     },
     semantic_evaluation: {
       judge_version: "structured-semantic-v1",
@@ -101,6 +109,8 @@ async (page) => {
       id: "mobile-review",
       status: "pending",
       reasons: ["automatic_conflict"],
+      outcome: null,
+      rationale: null,
       created_at: "2026-07-15T00:00:00Z",
       resolved_at: null,
     } : null,
@@ -142,6 +152,8 @@ async (page) => {
       id: "single-review",
       status: "pending",
       reasons: ["judge_failure"],
+      outcome: null,
+      rationale: null,
       created_at: "2026-07-15T00:00:00Z",
       resolved_at: null,
     },
@@ -180,10 +192,31 @@ async (page) => {
       version_role: "candidate",
       status: "pending",
       reasons: ["automatic_conflict"],
+      outcome: null,
+      rationale: null,
       created_at: "2026-07-15T00:00:00Z",
       resolved_at: null,
     },
   ];
+  let reviewResolved = false;
+  const reviewRationale = "The semantic evidence justifies passing this response.";
+  const reviewDetail = (resolved) => ({
+    ...reviewItems[0],
+    status: resolved ? "resolved" : "pending",
+    outcome: resolved ? "pass" : null,
+    rationale: resolved ? reviewRationale : null,
+    resolved_at: resolved ? "2026-07-15T00:05:00Z" : null,
+    execution: {
+      ...execution("candidate"),
+      human_review_item: {
+        ...execution("candidate").human_review_item,
+        status: resolved ? "resolved" : "pending",
+        outcome: resolved ? "pass" : null,
+        rationale: resolved ? reviewRationale : null,
+        resolved_at: resolved ? "2026-07-15T00:05:00Z" : null,
+      },
+    },
+  });
 
   const consoleIssues = [];
   page.on("console", (message) => {
@@ -193,6 +226,7 @@ async (page) => {
   });
   page.on("pageerror", (error) => consoleIssues.push(`pageerror: ${error.message}`));
   await page.route("**/api/**", async (route) => {
+    const request = route.request();
     const requestUrl = route.request().url();
     const pathname = requestUrl.slice(requestUrl.indexOf("/api/")).split("?")[0];
     let body;
@@ -200,7 +234,15 @@ async (page) => {
     else if (pathname === "/api/evaluation-suites") body = [suite];
     else if (pathname === `/api/evaluation-suites/${suite.id}`) body = suiteDetail;
     else if (pathname === "/api/evaluation-runs") body = [run];
-    else if (pathname === "/api/human-review-items") body = reviewItems;
+    else if (pathname === "/api/human-review-items") {
+      body = requestUrl.includes("status=resolved")
+        ? (reviewResolved ? [reviewDetail(true)] : [])
+        : (reviewResolved ? [] : reviewItems);
+    }
+    else if (pathname === "/api/human-review-items/mobile-review") {
+      if (request.method() === "PATCH") reviewResolved = true;
+      body = reviewDetail(reviewResolved);
+    }
     else if (pathname === "/api/test-case-executions") body = singleExecution;
     else body = { detail: `Unexpected browser fixture request: ${pathname}` };
     await route.fulfill({
@@ -260,6 +302,35 @@ async (page) => {
   await page.getByRole("region", { name: "Human Review queue" }).waitFor();
   await page.getByText("1 unresolved").waitFor();
   await page.getByText("Semantic fail").waitFor();
+  await assertViewport(390, 844, 3);
+  await assertViewport(1440, 1000, 5);
+  const reviewQueue = page.getByRole("region", { name: "Human Review queue" });
+  const reviewButtonName = "Review Keep all progress evidence readable for Mobile candidate (candidate, run mobile-run)";
+  await reviewQueue.getByRole("button", { name: reviewButtonName }).click();
+  const reviewPanel = page.getByRole("region", { name: "Human Review detail" });
+  await reviewPanel.getByText("Summarize the policy.").waitFor();
+  await reviewPanel.locator(".human-review-detail__context")
+    .getByText("Persisted response evidence.", { exact: true }).waitFor();
+  await reviewPanel.getByText("Deterministic pass").waitFor();
+  await reviewPanel.getByText("Scorer exact-phrase-v1").waitFor();
+  await reviewPanel.getByText("Matched response: Persisted response evidence.").waitFor();
+  await reviewPanel.getByText("Semantic fail").waitFor();
+  await reviewPanel.getByText("Automatic score conflict", { exact: true }).waitFor();
+  await reviewPanel.getByLabel("Human outcome").selectOption("pass");
+  await reviewPanel.getByLabel("Review rationale").fill(reviewRationale);
+  await reviewPanel.getByRole("button", { name: "Submit Human Review" }).click();
+  await reviewPanel.getByText("Human review pass").waitFor();
+  await reviewPanel.getByText(reviewRationale).waitFor();
+  await reviewQueue.getByText("0 unresolved").waitFor();
+  await reviewQueue.getByRole("button", { name: "Resolved history" }).click();
+  await reviewQueue.getByRole("button", { name: "Resolved history (1)" }).waitFor();
+  await reviewQueue.getByRole("button", { name: reviewButtonName }).click();
+  const reopenedReview = page.getByRole("region", { name: "Human Review detail" });
+  await reopenedReview.getByText("Human review pass").waitFor();
+  await reopenedReview.getByText(reviewRationale).waitFor();
+  await reopenedReview.getByText("Deterministic pass").waitFor();
+  await reopenedReview.getByText("Semantic fail").waitFor();
+  await reopenedReview.getByText("Matched response: Persisted response evidence.").waitFor();
   await assertViewport(390, 844, 3);
   await assertViewport(1440, 1000, 5);
   await page.getByRole("button", { name: "Test Case Execution" }).click();
