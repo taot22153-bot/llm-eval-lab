@@ -4,7 +4,7 @@ Local-first quality and safety evaluation for LLM applications.
 
 > Status: active development. Application Versions, a versioned sample Evaluation Suite,
 > provider-neutral Test Case execution, persisted Baseline/Candidate Evaluation Runs, and
-> layered deterministic/semantic evidence with Human Review routing are implemented.
+> layered deterministic/semantic evidence with an auditable Human Review workflow are implemented.
 
 ## Why this project
 
@@ -34,6 +34,10 @@ LLM Eval Lab is planned as a local Web console that compares a candidate applica
 - Keep deterministic evidence and semantic judgment visibly separate, and create a pending Human
   Review queue item for score conflicts, low confidence, insufficient evidence, judge failures, or
   Test Cases that explicitly require review.
+- Filter unresolved and resolved Human Reviews, inspect the original input, grounding, response,
+  deterministic rules, semantic judgment, and routing reason, then submit a required pass/fail
+  outcome with rationale. A completed review is immutable, leaves the active queue, remains in
+  resolved history, and appears beside the unchanged automatic evidence in Evaluation Runs.
 - Use local Ollama in the application while automated tests substitute a deterministic adapter behind
   the same provider-neutral boundary.
 - Verify the workflow with backend integration tests and frontend interaction tests.
@@ -75,9 +79,10 @@ npm --prefix frontend run build
 ```
 
 The browser regression command starts an isolated Vite server, provides deterministic API fixtures,
-and checks the Evaluation Runs layout at 390×844 and 1440×1000. It uses installed Microsoft Edge on
-Windows; set `PLAYWRIGHT_BROWSER=chrome` to exercise the same Chrome channel used in CI. The command
-pins the Playwright CLI version and does not install or download a browser.
+submits and reopens a Human Review, and checks the Evaluation Runs layout at 390×844 and 1440×1000.
+It uses installed Microsoft Edge on Windows; set `PLAYWRIGHT_BROWSER=chrome` to exercise the same
+Chrome channel used in CI. The command pins the Playwright CLI version and does not install or
+download a browser.
 
 The setup and start scripts both run the idempotent sample seed. To verify it directly,
 run the command twice; both runs should report the same eight-case suite:

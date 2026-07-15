@@ -123,6 +123,8 @@ def serialize_test_case_execution(execution: TestCaseExecution) -> dict[str, Any
                 "id": human_review_item.id,
                 "status": human_review_item.status,
                 "reasons": human_review_item.reasons,
+                "outcome": human_review_item.outcome,
+                "rationale": human_review_item.rationale,
                 "created_at": human_review_item.created_at,
                 "resolved_at": human_review_item.resolved_at,
             }

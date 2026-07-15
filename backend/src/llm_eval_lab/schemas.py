@@ -1,7 +1,14 @@
 from datetime import UTC, datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_serializer
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    field_serializer,
+    field_validator,
+)
 
 
 class ApplicationVersionCreate(BaseModel):
@@ -121,6 +128,8 @@ class HumanReviewItemRead(BaseModel):
             "judge_failure",
         ]
     ]
+    outcome: Literal["pass", "fail"] | None
+    rationale: str | None
     created_at: datetime
     resolved_at: datetime | None
 
@@ -139,6 +148,19 @@ class HumanReviewQueueItemRead(HumanReviewItemRead):
     application_version_name: str
     evaluation_run_id: str | None
     version_role: Literal["baseline", "candidate"] | None
+
+
+class HumanReviewDecisionCreate(BaseModel):
+    outcome: Literal["pass", "fail"]
+    rationale: str = Field(min_length=1, max_length=2000)
+
+    @field_validator("rationale")
+    @classmethod
+    def validate_rationale(cls, value: str) -> str:
+        rationale = value.strip()
+        if not rationale:
+            raise ValueError("A Human Review rationale is required.")
+        return rationale
 
 
 class TestCaseExecutionRead(BaseModel):
@@ -169,6 +191,10 @@ class TestCaseExecutionRead(BaseModel):
         if value.tzinfo is None:
             value = value.replace(tzinfo=UTC)
         return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+class HumanReviewDetailRead(HumanReviewQueueItemRead):
+    execution: TestCaseExecutionRead
 
 
 class EvaluationRunCreate(BaseModel):

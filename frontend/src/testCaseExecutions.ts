@@ -46,6 +46,8 @@ export interface HumanReviewItem {
   id: string;
   status: "pending" | "resolved";
   reasons: HumanReviewReason[];
+  outcome: "pass" | "fail" | null;
+  rationale: string | null;
   created_at: string;
   resolved_at: string | null;
 }

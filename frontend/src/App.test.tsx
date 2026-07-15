@@ -154,6 +154,8 @@ const judgedFailureExecution = {
     id: "single-review",
     status: "pending",
     reasons: ["judge_failure"],
+    outcome: null,
+    rationale: null,
     created_at: "2026-07-15T00:00:00.125Z",
     resolved_at: null,
   },
@@ -359,6 +361,8 @@ const scoredEvaluationRun = {
         id: "review-01",
         status: "pending",
         reasons: ["automatic_conflict"],
+        outcome: null,
+        rationale: null,
         created_at: "2026-07-15T00:00:01Z",
         resolved_at: null,
       },
@@ -376,6 +380,8 @@ const pendingReviewItems = [
     version_role: "candidate",
     status: "pending",
     reasons: ["automatic_conflict"],
+    outcome: null,
+    rationale: null,
     created_at: "2026-07-15T00:00:01Z",
     resolved_at: null,
   },
@@ -391,10 +397,123 @@ const singleExecutionReviewItems = [
     version_role: null,
     status: "pending",
     reasons: ["judge_failure"],
+    outcome: null,
+    rationale: null,
     created_at: "2026-07-15T00:00:00Z",
     resolved_at: null,
   },
 ];
+
+const pendingReviewDetail = {
+  ...pendingReviewItems[0],
+  execution: {
+    ...scoredEvaluationRun.executions[1],
+    deterministic_evaluation: {
+      scorer_version: "exact-phrase-v1",
+      passed: true,
+      regression_classification: null,
+      outcomes: [
+        {
+          check_type: "must_have_fact",
+          position: 1,
+          rule: "Secure answer.",
+          passed: true,
+          matched_evidence: "Secure answer.",
+        },
+      ],
+    },
+    semantic_evaluation: {
+      ...scoredEvaluationRun.executions[1].semantic_evaluation,
+      outcome: "fail",
+      rationale: "The response meaning conflicts with the supplied evidence.",
+      confidence: 0.91,
+    },
+  },
+};
+
+const alternateReviewItem = {
+  ...pendingReviewItems[0],
+  id: "review-02",
+  test_case_execution_id: "03-execution",
+  test_case_title: "Second Human Review target",
+};
+
+const alternateReviewDetail = {
+  ...alternateReviewItem,
+  execution: {
+    ...pendingReviewDetail.execution,
+    id: alternateReviewItem.test_case_execution_id,
+    test_case_title: alternateReviewItem.test_case_title,
+  },
+};
+
+const historicalSuiteSummary = {
+  ...sampleSuiteSummary,
+  id: "historical-suite",
+  version: 2,
+  name: "Historical Review Suite",
+};
+
+const historicalEvaluationRun = {
+  ...scoredEvaluationRun,
+  id: "historical-run",
+  baseline_version: { id: candidateVersion.id, name: candidateVersion.name },
+  candidate_version: { id: createdVersion.id, name: createdVersion.name },
+  evaluation_suite: {
+    id: historicalSuiteSummary.id,
+    slug: historicalSuiteSummary.slug,
+    version: historicalSuiteSummary.version,
+    name: historicalSuiteSummary.name,
+  },
+};
+
+const historicalReviewItem = {
+  ...pendingReviewItems[0],
+  id: "historical-review",
+  evaluation_run_id: historicalEvaluationRun.id,
+};
+
+const historicalReviewDetail = {
+  ...pendingReviewDetail,
+  ...historicalReviewItem,
+};
+
+const historicalResolvedReviewItem = {
+  ...pendingReviewItems[0],
+  id: "resolved-before-page-load",
+  evaluation_run_id: "older-run-00",
+  status: "resolved",
+  outcome: "fail",
+  rationale: "An earlier reviewer rejected this response.",
+  resolved_at: "2026-07-14T23:00:00Z",
+};
+
+function reviewButtonName(item: {
+  test_case_title: string;
+  application_version_name: string;
+  version_role: string | null;
+  evaluation_run_id: string | null;
+}): string {
+  return `Review ${item.test_case_title} for ${item.application_version_name} (${item.version_role}, run ${item.evaluation_run_id})`;
+}
+
+const resolvedReviewDetail = {
+  ...pendingReviewDetail,
+  status: "resolved",
+  outcome: "pass",
+  rationale: "The response is acceptable by meaning despite the literal-rule conflict.",
+  resolved_at: "2026-07-15T00:05:00Z",
+  execution: {
+    ...pendingReviewDetail.execution,
+    human_review_item: {
+      ...pendingReviewDetail.execution.human_review_item,
+      status: "resolved",
+      outcome: "pass",
+      rationale: "The response is acceptable by meaning despite the literal-rule conflict.",
+      resolved_at: "2026-07-15T00:05:00Z",
+    },
+  },
+};
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -799,6 +918,202 @@ describe("Application Versions", () => {
     ).toBeInTheDocument();
     expect(within(candidateEvidence).getByText("Pending human review")).toBeInTheDocument();
     expect(within(candidateEvidence).getByText("fixture-judge / independent-judge-v1")).toBeInTheDocument();
+  });
+
+  it("inspects and resolves a queued result while preserving both automatic layers", async () => {
+    const user = userEvent.setup();
+    fetchMock
+      .mockReset()
+      .mockResolvedValueOnce(jsonResponse([createdVersion, candidateVersion]))
+      .mockResolvedValueOnce(jsonResponse([sampleSuiteSummary]))
+      .mockResolvedValueOnce(jsonResponse([scoredEvaluationRun]))
+      .mockResolvedValueOnce(jsonResponse(pendingReviewItems))
+      .mockResolvedValueOnce(jsonResponse(pendingReviewDetail))
+      .mockResolvedValueOnce(jsonResponse(resolvedReviewDetail))
+      .mockResolvedValueOnce(jsonResponse({ detail: "Queue refresh is temporarily unavailable." }, 503))
+      .mockResolvedValueOnce(
+        jsonResponse([resolvedReviewDetail, historicalResolvedReviewItem]),
+      );
+
+    render(<App />);
+    expect(await screen.findByText(createdVersion.name)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Evaluation Runs" }));
+
+    const reviewQueue = await screen.findByRole("region", { name: "Human Review queue" });
+    await user.click(
+      within(reviewQueue).getByRole("button", {
+        name: reviewButtonName(pendingReviewItems[0]),
+      }),
+    );
+
+    const detail = await screen.findByRole("region", { name: "Human Review detail" });
+    expect(within(detail).getByText(pendingExecution.prompt_context.user_input)).toBeInTheDocument();
+    expect(within(detail).getByText("Secure answer. Leaked secret.")).toBeInTheDocument();
+    expect(within(detail).getByText("Deterministic pass")).toBeInTheDocument();
+    expect(within(detail).getByText("Scorer exact-phrase-v1")).toBeInTheDocument();
+    expect(within(detail).getByText("Matched response: Secure answer.")).toBeInTheDocument();
+    expect(within(detail).getByText("Semantic fail")).toBeInTheDocument();
+    expect(within(detail).getByText("Automatic score conflict")).toBeInTheDocument();
+
+    const submit = within(detail).getByRole("button", { name: "Submit Human Review" });
+    expect(submit).toBeDisabled();
+    await user.selectOptions(within(detail).getByLabelText("Human outcome"), "pass");
+    await user.type(
+      within(detail).getByLabelText("Review rationale"),
+      "The response is acceptable by meaning despite the literal-rule conflict.",
+    );
+    await user.click(submit);
+
+    expect(await within(detail).findByText("Human review pass")).toBeInTheDocument();
+    expect(
+      within(detail).getByText(
+        "The response is acceptable by meaning despite the literal-rule conflict.",
+      ),
+    ).toBeInTheDocument();
+    const candidateEvidence = screen.getByRole("region", { name: "candidate evidence" });
+    expect(await within(candidateEvidence).findByText("Human review pass")).toBeInTheDocument();
+    expect(within(candidateEvidence).getByText("Deterministic pass")).toBeInTheDocument();
+    expect(within(candidateEvidence).getByText("Semantic fail")).toBeInTheDocument();
+    expect(within(reviewQueue).getByText("0 unresolved")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Human Review was saved, but the queue could not be refreshed.",
+    );
+    await user.click(within(reviewQueue).getByRole("button", { name: "Resolved history" }));
+    expect(
+      within(reviewQueue).getByRole("button", { name: "Resolved history (2)" }),
+    ).toHaveAttribute("aria-pressed", "true");
+    expect(
+      within(reviewQueue).getByRole("button", {
+        name: reviewButtonName(pendingReviewItems[0]),
+      }),
+    ).toBeInTheDocument();
+    expect(
+      within(reviewQueue).getByRole("button", {
+        name: reviewButtonName(historicalResolvedReviewItem),
+      }),
+    ).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      6,
+      "/api/human-review-items/review-01",
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          outcome: "pass",
+          rationale: "The response is acceptable by meaning despite the literal-rule conflict.",
+        }),
+      },
+    );
+  });
+
+  it("keeps a delayed Human Review response from replacing a newer selection", async () => {
+    const user = userEvent.setup();
+    let resolveFirstRequest: ((response: Response) => void) | undefined;
+    const firstRequest = new Promise<Response>((resolve) => {
+      resolveFirstRequest = resolve;
+    });
+    fetchMock
+      .mockReset()
+      .mockResolvedValueOnce(jsonResponse([createdVersion, candidateVersion]))
+      .mockResolvedValueOnce(jsonResponse([sampleSuiteSummary]))
+      .mockResolvedValueOnce(jsonResponse([scoredEvaluationRun]))
+      .mockResolvedValueOnce(jsonResponse([pendingReviewItems[0], alternateReviewItem]))
+      .mockReturnValueOnce(firstRequest)
+      .mockResolvedValueOnce(jsonResponse(alternateReviewDetail));
+
+    render(<App />);
+    expect(await screen.findByText(createdVersion.name)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Evaluation Runs" }));
+
+    const reviewQueue = await screen.findByRole("region", { name: "Human Review queue" });
+    await user.click(
+      within(reviewQueue).getByRole("button", {
+        name: reviewButtonName(pendingReviewItems[0]),
+      }),
+    );
+    expect(screen.queryByRole("region", { name: "Human Review detail" })).not.toBeInTheDocument();
+    await user.click(
+      within(reviewQueue).getByRole("button", {
+        name: reviewButtonName(alternateReviewItem),
+      }),
+    );
+
+    const detail = await screen.findByRole("region", { name: "Human Review detail" });
+    expect(within(detail).getByRole("heading", { name: alternateReviewItem.test_case_title })).toBeInTheDocument();
+    resolveFirstRequest?.(jsonResponse(pendingReviewDetail));
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(
+      within(screen.getByRole("region", { name: "Human Review detail" })).getByRole(
+        "heading",
+        { name: alternateReviewItem.test_case_title },
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("invalidates a delayed detail request when the reviewer changes queue status", async () => {
+    const user = userEvent.setup();
+    let resolveDetailRequest: ((response: Response) => void) | undefined;
+    const detailRequest = new Promise<Response>((resolve) => {
+      resolveDetailRequest = resolve;
+    });
+    fetchMock
+      .mockReset()
+      .mockResolvedValueOnce(jsonResponse([createdVersion, candidateVersion]))
+      .mockResolvedValueOnce(jsonResponse([sampleSuiteSummary]))
+      .mockResolvedValueOnce(jsonResponse([scoredEvaluationRun]))
+      .mockResolvedValueOnce(jsonResponse(pendingReviewItems))
+      .mockReturnValueOnce(detailRequest)
+      .mockResolvedValueOnce(jsonResponse([]));
+
+    render(<App />);
+    expect(await screen.findByText(createdVersion.name)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Evaluation Runs" }));
+
+    const reviewQueue = await screen.findByRole("region", { name: "Human Review queue" });
+    await user.click(
+      within(reviewQueue).getByRole("button", {
+        name: reviewButtonName(pendingReviewItems[0]),
+      }),
+    );
+    await user.click(within(reviewQueue).getByRole("button", { name: "Resolved history" }));
+    resolveDetailRequest?.(jsonResponse(pendingReviewDetail));
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+    expect(screen.queryByRole("region", { name: "Human Review detail" })).not.toBeInTheDocument();
+    expect(
+      within(reviewQueue).getByRole("button", { name: "Resolved history (0)" }),
+    ).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("synchronizes comparison controls when a review opens an older Evaluation Run", async () => {
+    const user = userEvent.setup();
+    fetchMock
+      .mockReset()
+      .mockResolvedValueOnce(jsonResponse([createdVersion, candidateVersion]))
+      .mockResolvedValueOnce(jsonResponse([sampleSuiteSummary, historicalSuiteSummary]))
+      .mockResolvedValueOnce(jsonResponse([scoredEvaluationRun]))
+      .mockResolvedValueOnce(jsonResponse([historicalReviewItem]))
+      .mockResolvedValueOnce(jsonResponse(historicalReviewDetail))
+      .mockResolvedValueOnce(jsonResponse(historicalEvaluationRun));
+
+    render(<App />);
+    expect(await screen.findByText(createdVersion.name)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Evaluation Runs" }));
+
+    const reviewQueue = await screen.findByRole("region", { name: "Human Review queue" });
+    await user.click(
+      within(reviewQueue).getByRole("button", {
+        name: reviewButtonName(historicalReviewItem),
+      }),
+    );
+    await screen.findByRole("region", { name: "Human Review detail" });
+
+    const controls = screen.getByRole("region", { name: "Evaluation Run controls" });
+    expect(within(controls).getByLabelText("Baseline")).toHaveValue(candidateVersion.id);
+    expect(within(controls).getByLabelText("Candidate")).toHaveValue(createdVersion.id);
+    expect(within(controls).getByLabelText("Evaluation Suite")).toHaveValue(
+      historicalSuiteSummary.id,
+    );
   });
 
   it("keeps single-execution reviews visible even when there is no Evaluation Run", async () => {

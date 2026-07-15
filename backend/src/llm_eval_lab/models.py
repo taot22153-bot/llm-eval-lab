@@ -312,6 +312,17 @@ class HumanReviewItem(Base):
             "status IN ('pending', 'resolved')",
             name="ck_human_review_item_status",
         ),
+        CheckConstraint(
+            "outcome IS NULL OR outcome IN ('pass', 'fail')",
+            name="ck_human_review_item_outcome",
+        ),
+        CheckConstraint(
+            "(status = 'pending' AND outcome IS NULL AND rationale IS NULL "
+            "AND resolved_at IS NULL) OR "
+            "(status = 'resolved' AND outcome IS NOT NULL AND rationale IS NOT NULL "
+            "AND resolved_at IS NOT NULL)",
+            name="ck_human_review_item_decision_state",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
@@ -321,6 +332,8 @@ class HumanReviewItem(Base):
     )
     status: Mapped[str] = mapped_column(String(24), default="pending")
     reasons: Mapped[list[str]] = mapped_column(JSON)
+    outcome: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    rationale: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),

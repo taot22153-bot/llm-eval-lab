@@ -1,10 +1,16 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, Play, RefreshCw } from "lucide-react";
 
 import { ApplicationVersion } from "./applicationVersions";
 import ExecutionAssessment, { reviewReasonLabel } from "./ExecutionAssessment";
 import { EvaluationSuiteSummary, listEvaluationSuites } from "./evaluationSuites";
-import { HumanReviewQueueItem, listHumanReviewItems } from "./humanReviewItems";
+import {
+  HumanReviewDetail,
+  HumanReviewQueueItem,
+  getHumanReviewItem,
+  listHumanReviewItems,
+  resolveHumanReviewItem,
+} from "./humanReviewItems";
 import {
   EvaluationRun,
   EvaluationRunExecution,
@@ -62,8 +68,143 @@ function ExecutionEvidence({ execution }: { execution: EvaluationRunExecution })
   );
 }
 
-function HumanReviewQueue({ items }: { items: HumanReviewQueueItem[] }) {
-  if (items.length === 0) return null;
+function HumanReviewDetailPanel({
+  detail,
+  humanOutcome,
+  rationale,
+  isResolving,
+  onOutcomeChange,
+  onRationaleChange,
+  onSubmit,
+}: {
+  detail: HumanReviewDetail;
+  humanOutcome: "" | "pass" | "fail";
+  rationale: string;
+  isResolving: boolean;
+  onOutcomeChange: (outcome: "" | "pass" | "fail") => void;
+  onRationaleChange: (rationale: string) => void;
+  onSubmit: () => void;
+}) {
+  const execution = detail.execution;
+  return (
+    <section className="human-review-detail" aria-label="Human Review detail">
+      <div className="human-review-detail__heading">
+        <div>
+          <p className="eyebrow">Auditable reviewer decision</p>
+          <h3>{detail.test_case_title}</h3>
+        </div>
+        <span>{detail.version_role ?? "single execution"}</span>
+      </div>
+      <div className="human-review-detail__context">
+        <article>
+          <strong>User input</strong>
+          <p>{execution.prompt_context.user_input}</p>
+        </article>
+        <article>
+          <strong>Model response</strong>
+          <p>{execution.model_response ?? "No model response was persisted."}</p>
+        </article>
+      </div>
+      {execution.prompt_context.grounding_material.length > 0 ? (
+        <section className="human-review-grounding" aria-label="Grounding material">
+          <strong>Grounding material</strong>
+          <div>
+            {execution.prompt_context.grounding_material.map((material) => (
+              <article key={`${material.kind}-${material.title}`}>
+                <span>{material.kind}</span>
+                <strong>{material.title}</strong>
+                <p>{material.content}</p>
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
+      <div className="human-review-detail__routing">
+        <strong>Routing reason: {detail.reasons.map(reviewReasonLabel).join(" | ")}</strong>
+      </div>
+      <ExecutionAssessment execution={execution} showAllDeterministicEvidence />
+      {detail.status === "pending" ? (
+        <form
+          className="human-review-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            onSubmit();
+          }}
+        >
+          <label>
+            <span>Human outcome</span>
+            <select
+              value={humanOutcome}
+              onChange={(event) =>
+                onOutcomeChange(event.target.value as "" | "pass" | "fail")
+              }
+            >
+              <option value="">Choose an outcome</option>
+              <option value="pass">Pass</option>
+              <option value="fail">Fail</option>
+            </select>
+          </label>
+          <label>
+            <span>Review rationale</span>
+            <textarea
+              rows={4}
+              maxLength={2000}
+              value={rationale}
+              onChange={(event) => onRationaleChange(event.target.value)}
+              placeholder="Explain why the evidence supports this decision."
+            />
+          </label>
+          <button
+            className="primary-button"
+            type="submit"
+            disabled={isResolving || humanOutcome === "" || rationale.trim() === ""}
+          >
+            {isResolving ? "Saving Human Review..." : "Submit Human Review"}
+          </button>
+        </form>
+      ) : (
+        <div className="human-review-decision">
+          <small>Resolved {detail.resolved_at}</small>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function HumanReviewQueue({
+  pendingItems,
+  resolvedItems,
+  resolvedHistoryLoaded,
+  filter,
+  selectedReview,
+  isLoadingReview,
+  humanOutcome,
+  rationale,
+  isResolving,
+  navigationDisabled,
+  onFilterChange,
+  onOpenReview,
+  onOutcomeChange,
+  onRationaleChange,
+  onSubmit,
+}: {
+  pendingItems: HumanReviewQueueItem[];
+  resolvedItems: HumanReviewQueueItem[];
+  resolvedHistoryLoaded: boolean;
+  filter: "pending" | "resolved";
+  selectedReview: HumanReviewDetail | null;
+  isLoadingReview: boolean;
+  humanOutcome: "" | "pass" | "fail";
+  rationale: string;
+  isResolving: boolean;
+  navigationDisabled: boolean;
+  onFilterChange: (filter: "pending" | "resolved") => void;
+  onOpenReview: (item: HumanReviewQueueItem) => void;
+  onOutcomeChange: (outcome: "" | "pass" | "fail") => void;
+  onRationaleChange: (rationale: string) => void;
+  onSubmit: () => void;
+}) {
+  const items = filter === "pending" ? pendingItems : resolvedItems;
   return (
     <section className="human-review-queue" aria-label="Human Review queue">
       <div className="human-review-queue__heading">
@@ -71,20 +212,69 @@ function HumanReviewQueue({ items }: { items: HumanReviewQueueItem[] }) {
           <p className="eyebrow">Automatic evidence needs a person</p>
           <h3>Human Review queue</h3>
         </div>
-        <strong>{items.length} unresolved</strong>
+        <strong>{pendingItems.length} unresolved</strong>
       </div>
-      <ul>
-        {items.map((item) => (
-          <li key={item.id}>
-            <div>
-              <strong>{item.test_case_title}</strong>
-              <span>{item.version_role ?? "single execution"}</span>
-            </div>
-            <p>{item.application_version_name}</p>
-            <p>{item.reasons.map(reviewReasonLabel).join(" | ")}</p>
-          </li>
-        ))}
-      </ul>
+      <div className="human-review-filters" role="group" aria-label="Human Review status">
+        <button
+          className={filter === "pending" ? "active" : ""}
+          type="button"
+          aria-pressed={filter === "pending"}
+          disabled={navigationDisabled}
+          onClick={() => onFilterChange("pending")}
+        >
+          Unresolved ({pendingItems.length})
+        </button>
+        <button
+          className={filter === "resolved" ? "active" : ""}
+          type="button"
+          aria-pressed={filter === "resolved"}
+          disabled={navigationDisabled}
+          onClick={() => onFilterChange("resolved")}
+        >
+          Resolved history{resolvedHistoryLoaded ? ` (${resolvedItems.length})` : ""}
+        </button>
+      </div>
+      {items.length > 0 ? (
+        <ul>
+          {items.map((item) => (
+            <li key={item.id}>
+              <button
+                type="button"
+                aria-label={
+                  `Review ${item.test_case_title} for ${item.application_version_name} `
+                  + `(${item.version_role ?? "single execution"}, `
+                  + `${item.evaluation_run_id ? `run ${item.evaluation_run_id}` : "no run"})`
+                }
+                disabled={navigationDisabled}
+                onClick={() => onOpenReview(item)}
+              >
+                <div>
+                  <strong>{item.test_case_title}</strong>
+                  <span>{item.version_role ?? "single execution"}</span>
+                </div>
+                <p>{item.application_version_name}</p>
+                <p>{item.reasons.map(reviewReasonLabel).join(" | ")}</p>
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="human-review-queue__empty">
+          {filter === "pending" ? "No unresolved Human Reviews." : "No resolved Human Reviews yet."}
+        </p>
+      )}
+      {isLoadingReview ? <p className="human-review-queue__empty">Loading review evidence...</p> : null}
+      {selectedReview ? (
+        <HumanReviewDetailPanel
+          detail={selectedReview}
+          humanOutcome={humanOutcome}
+          rationale={rationale}
+          isResolving={isResolving}
+          onOutcomeChange={onOutcomeChange}
+          onRationaleChange={onRationaleChange}
+          onSubmit={onSubmit}
+        />
+      ) : null}
     </section>
   );
 }
@@ -139,13 +329,7 @@ function VersionEvidence({ run, role }: { run: EvaluationRun; role: VersionRole 
   );
 }
 
-function EvaluationRunResult({
-  run,
-  reviewItems,
-}: {
-  run: EvaluationRun;
-  reviewItems: HumanReviewQueueItem[];
-}) {
+function EvaluationRunResult({ run }: { run: EvaluationRun }) {
   const progress = [
     ["Total", run.progress.total],
     ["Queued", run.progress.queued],
@@ -209,9 +393,25 @@ export default function EvaluationRunsWorkspace({ versions }: { versions: Applic
   const [suiteId, setSuiteId] = useState("");
   const [evaluationRun, setEvaluationRun] = useState<EvaluationRun | null>(null);
   const [reviewItems, setReviewItems] = useState<HumanReviewQueueItem[]>([]);
+  const [resolvedReviewItems, setResolvedReviewItems] = useState<HumanReviewQueueItem[]>([]);
+  const [resolvedHistoryLoaded, setResolvedHistoryLoaded] = useState(false);
+  const [reviewFilter, setReviewFilter] = useState<"pending" | "resolved">("pending");
+  const [selectedReview, setSelectedReview] = useState<HumanReviewDetail | null>(null);
+  const [humanOutcome, setHumanOutcome] = useState<"" | "pass" | "fail">("");
+  const [reviewRationale, setReviewRationale] = useState("");
+  const [isLoadingReview, setIsLoadingReview] = useState(false);
+  const [isResolvingReview, setIsResolvingReview] = useState(false);
+  const reviewRequestId = useRef(0);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  function showEvaluationRun(run: EvaluationRun) {
+    setEvaluationRun(run);
+    setBaselineId(run.baseline_version.id);
+    setCandidateId(run.candidate_version.id);
+    setSuiteId(run.evaluation_suite.id);
+  }
 
   useEffect(() => {
     if (versions.length === 0) return;
@@ -230,11 +430,9 @@ export default function EvaluationRunsWorkspace({ versions }: { versions: Applic
         if (!active) return;
         setSuites(loadedSuites);
         const latestRun = loadedRuns[0] ?? null;
-        setEvaluationRun(latestRun);
         setReviewItems(loadedReviewItems);
-        setBaselineId(latestRun?.baseline_version.id ?? "");
-        setCandidateId(latestRun?.candidate_version.id ?? "");
-        setSuiteId(latestRun?.evaluation_suite.id ?? loadedSuites[0]?.id ?? "");
+        if (latestRun) showEvaluationRun(latestRun);
+        else setSuiteId(loadedSuites[0]?.id ?? "");
       })
       .catch((reason: unknown) => {
         if (active) {
@@ -258,7 +456,7 @@ export default function EvaluationRunsWorkspace({ versions }: { versions: Applic
       try {
         const current = await getEvaluationRun(evaluationRun.id);
         if (active) {
-          setEvaluationRun(current);
+          showEvaluationRun(current);
           if (current.status === "completed" || current.status === "failed") {
             const currentReviewItems = await listHumanReviewItems();
             if (active) setReviewItems(currentReviewItems);
@@ -283,11 +481,95 @@ export default function EvaluationRunsWorkspace({ versions }: { versions: Applic
     setError(null);
     try {
       const current = await createEvaluationRun(baselineId, candidateId, suiteId);
-      setEvaluationRun(current);
+      showEvaluationRun(current);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Unable to run the comparison.");
     } finally {
       setIsSubmitting(false);
+    }
+  }
+
+  async function changeReviewFilter(filter: "pending" | "resolved") {
+    if (isResolvingReview) return;
+    reviewRequestId.current += 1;
+    setSelectedReview(null);
+    setHumanOutcome("");
+    setReviewRationale("");
+    setIsLoadingReview(false);
+    setReviewFilter(filter);
+    if (filter !== "resolved" || resolvedHistoryLoaded) return;
+    try {
+      setResolvedReviewItems(await listHumanReviewItems("resolved"));
+      setResolvedHistoryLoaded(true);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Unable to load resolved Human Reviews.");
+    }
+  }
+
+  async function openReview(item: HumanReviewQueueItem) {
+    if (isResolvingReview) return;
+    const requestId = reviewRequestId.current + 1;
+    reviewRequestId.current = requestId;
+    setIsLoadingReview(true);
+    setError(null);
+    setSelectedReview(null);
+    setHumanOutcome("");
+    setReviewRationale("");
+    try {
+      const detail = await getHumanReviewItem(item.id);
+      let historicalRun: EvaluationRun | null = null;
+      if (detail.evaluation_run_id && detail.evaluation_run_id !== evaluationRun?.id) {
+        historicalRun = await getEvaluationRun(detail.evaluation_run_id);
+      }
+      if (requestId !== reviewRequestId.current) return;
+      setSelectedReview(detail);
+      if (historicalRun) showEvaluationRun(historicalRun);
+    } catch (reason) {
+      if (requestId !== reviewRequestId.current) return;
+      setError(reason instanceof Error ? reason.message : "Unable to load Human Review evidence.");
+    } finally {
+      if (requestId === reviewRequestId.current) setIsLoadingReview(false);
+    }
+  }
+
+  async function submitReview() {
+    if (!selectedReview || humanOutcome === "" || reviewRationale.trim() === "") return;
+    setIsResolvingReview(true);
+    setError(null);
+    try {
+      const resolved = await resolveHumanReviewItem(
+        selectedReview.id,
+        humanOutcome,
+        reviewRationale,
+      );
+      setSelectedReview(resolved);
+      setReviewItems((current) => current.filter((item) => item.id !== resolved.id));
+      setResolvedReviewItems((current) => [
+        resolved,
+        ...current.filter((item) => item.id !== resolved.id),
+      ]);
+      setEvaluationRun((current) => {
+        if (!current || current.id !== resolved.evaluation_run_id) return current;
+        return {
+          ...current,
+          executions: current.executions.map((execution) =>
+            execution.id === resolved.execution.id
+              ? { ...resolved.execution, version_role: execution.version_role }
+              : execution,
+          ),
+        };
+      });
+      try {
+        setReviewItems(await listHumanReviewItems());
+      } catch {
+        setError(
+          "Human Review was saved, but the queue could not be refreshed. Reopen this workspace to retry.",
+        );
+      }
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Unable to save the Human Review.");
+    } finally {
+      setIsResolvingReview(false);
     }
   }
 
@@ -333,9 +615,25 @@ export default function EvaluationRunsWorkspace({ versions }: { versions: Applic
       </section>
       {invalidSelection ? <div className="error-banner" role="alert">Choose two different Application Versions.</div> : null}
       {versions.length < 2 ? <p className="empty-state">Create two Application Versions before comparing them.</p> : null}
-      <HumanReviewQueue items={reviewItems} />
+      <HumanReviewQueue
+        pendingItems={reviewItems}
+        resolvedItems={resolvedReviewItems}
+        resolvedHistoryLoaded={resolvedHistoryLoaded}
+        filter={reviewFilter}
+        selectedReview={selectedReview}
+        isLoadingReview={isLoadingReview}
+        humanOutcome={humanOutcome}
+        rationale={reviewRationale}
+        isResolving={isResolvingReview}
+        navigationDisabled={isResolvingReview}
+        onFilterChange={(filter) => void changeReviewFilter(filter)}
+        onOpenReview={(item) => void openReview(item)}
+        onOutcomeChange={setHumanOutcome}
+        onRationaleChange={setReviewRationale}
+        onSubmit={() => void submitReview()}
+      />
       {evaluationRun ? (
-        <EvaluationRunResult run={evaluationRun} reviewItems={reviewItems} />
+        <EvaluationRunResult run={evaluationRun} />
       ) : null}
       {!evaluationRun && versions.length >= 2 ? <p className="empty-state">No persisted Evaluation Runs yet.</p> : null}
     </>
