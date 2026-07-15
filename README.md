@@ -2,7 +2,8 @@
 
 Local-first quality and safety evaluation for LLM applications.
 
-> Status: active development. Application Versions and a versioned sample Evaluation Suite are implemented.
+> Status: active development. Application Versions, a versioned sample Evaluation Suite,
+> and persisted single-Test-Case execution through a provider-neutral model boundary are implemented.
 
 ## Why this project
 
@@ -17,6 +18,10 @@ LLM Eval Lab is planned as a local Web console that compares a candidate applica
 - Apply the schema with Alembic migrations.
 - Seed an idempotent, synthetic electronics-store Evaluation Suite with eight Test Cases.
 - Browse every Test Case and inspect its input, evidence, test type, severity, and review requirement.
+- Execute one selected Test Case against one Application Version and reopen the persisted response,
+  lifecycle state, latency, usage metadata, or actionable provider failure.
+- Use local Ollama in the application while automated tests substitute a deterministic adapter behind
+  the same provider-neutral boundary.
 - Verify the workflow with backend integration tests and frontend interaction tests.
 - Run the same checks in GitHub Actions.
 
@@ -55,6 +60,27 @@ run the command twice; both runs should report the same eight-case suite:
 
 Open the Web console, choose **Evaluation Suites**, and browse **Northstar Electronics
 Support v1** to inspect the complete synthetic evidence for each Test Case.
+
+### Run one Test Case with an existing Ollama model
+
+LLM Eval Lab does not download a model automatically. If Ollama and a suitable local model are
+already present, verify them without changing the machine:
+
+```powershell
+ollama list
+```
+
+Set `OLLAMA_BASE_URL` in the ignored `.env` only when the local service uses a non-default address.
+In the Web console:
+
+1. Create an Application Version with provider `ollama` and an exact model name from `ollama list`.
+2. Choose **Test Case Execution**.
+3. Select the Application Version and a Test Case, then choose **Run Test Case**.
+4. Confirm the persisted record reaches **Completed**, or use the displayed actionable error to start
+   Ollama or select an installed model.
+
+The prompt context and runtime response remain in the local MySQL database and are not committed.
+Automated verification does not require Ollama or a model download.
 
 ## Planned evaluation flow
 

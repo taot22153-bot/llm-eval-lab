@@ -60,3 +60,45 @@ class EvaluationSuiteSummary(BaseModel):
 
 class EvaluationSuiteDetail(EvaluationSuiteSummary):
     test_cases: list[TestCaseRead]
+
+
+class TestCaseExecutionCreate(BaseModel):
+    application_version_id: str
+    test_case_id: str
+
+
+class ModelUsageRead(BaseModel):
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    total_tokens: int | None = None
+
+
+class ModelFailureRead(BaseModel):
+    code: str
+    message: str
+
+
+class TestCaseExecutionRead(BaseModel):
+    id: str
+    application_version_id: str
+    application_version_name: str
+    test_case_id: str
+    test_case_key: str
+    test_case_title: str
+    status: Literal["pending", "running", "completed", "failed"]
+    prompt_context: dict[str, JsonValue]
+    model_response: str | None
+    usage: ModelUsageRead | None
+    latency_ms: int | None
+    error: ModelFailureRead | None
+    created_at: datetime
+    started_at: datetime | None
+    completed_at: datetime | None
+
+    @field_serializer("created_at", "started_at", "completed_at")
+    def serialize_datetime(self, value: datetime | None) -> str | None:
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=UTC)
+        return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
