@@ -93,6 +93,54 @@ class DeterministicEvaluationRead(BaseModel):
     outcomes: list[DeterministicCheckOutcomeRead]
 
 
+class SemanticEvaluationRead(BaseModel):
+    judge_version: str
+    outcome: Literal["pass", "fail", "insufficient_evidence"] | None
+    rationale: str | None
+    confidence: float | None
+    judge_configuration: dict[str, JsonValue]
+    error: ModelFailureRead | None
+    created_at: datetime
+
+    @field_serializer("created_at")
+    def serialize_created_at(self, value: datetime) -> str:
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=UTC)
+        return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+class HumanReviewItemRead(BaseModel):
+    id: str
+    status: Literal["pending", "resolved"]
+    reasons: list[
+        Literal[
+            "automatic_conflict",
+            "low_confidence",
+            "insufficient_evidence",
+            "test_case_requires_review",
+            "judge_failure",
+        ]
+    ]
+    created_at: datetime
+    resolved_at: datetime | None
+
+    @field_serializer("created_at", "resolved_at")
+    def serialize_datetime(self, value: datetime | None) -> str | None:
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=UTC)
+        return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+class HumanReviewQueueItemRead(HumanReviewItemRead):
+    test_case_execution_id: str
+    test_case_title: str
+    application_version_name: str
+    evaluation_run_id: str | None
+    version_role: Literal["baseline", "candidate"] | None
+
+
 class TestCaseExecutionRead(BaseModel):
     id: str
     application_version_id: str
@@ -108,6 +156,8 @@ class TestCaseExecutionRead(BaseModel):
     latency_ms: int | None
     error: ModelFailureRead | None
     deterministic_evaluation: DeterministicEvaluationRead | None
+    semantic_evaluation: SemanticEvaluationRead | None
+    human_review_item: HumanReviewItemRead | None
     created_at: datetime
     started_at: datetime | None
     completed_at: datetime | None

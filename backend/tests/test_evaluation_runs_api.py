@@ -26,6 +26,11 @@ from llm_eval_lab.model_provider import (
 )
 from llm_eval_lab.models import ApplicationVersion, EvaluationRun
 from llm_eval_lab.sample_suite import seed_sample_evaluation_suite
+from llm_eval_lab.semantic_judging import (
+    SemanticJudgeRequest,
+    SemanticJudgeResult,
+    get_semantic_judge,
+)
 
 
 class PromptAwareDeterministicAdapter:
@@ -60,11 +65,32 @@ class BlockingDeterministicAdapter:
         return ModelResponse(content=f"{request.system_prompt} Answer from evidence.")
 
 
+class DeterministicSemanticJudge:
+    low_confidence_threshold = 0.7
+
+    def configuration_snapshot(self):
+        return {
+            "judge_version": "structured-semantic-v1",
+            "provider": "fixture-judge",
+            "model": "deterministic-semantic-judge",
+            "generation_parameters": {"temperature": 0},
+            "low_confidence_threshold": 0.7,
+        }
+
+    def judge(self, request: SemanticJudgeRequest) -> SemanticJudgeResult:
+        return SemanticJudgeResult(
+            outcome="pass",
+            rationale="Deterministic fixture judgment.",
+            confidence=0.95,
+        )
+
+
 @pytest.fixture(autouse=True)
 def reset_database():
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
     app.dependency_overrides.clear()
+    app.dependency_overrides[get_semantic_judge] = lambda: DeterministicSemanticJudge()
     yield
     app.dependency_overrides.clear()
     Base.metadata.drop_all(bind=engine)
@@ -336,12 +362,16 @@ def test_orchestration_failure_is_recorded_and_remaining_cases_continue(monkeypa
     real_run_execution = evaluation_runs_module.run_test_case_execution
     calls = 0
 
-    def fail_first_execution(execution_id: str, provider_registry: ModelProviderRegistry):
+    def fail_first_execution(
+        execution_id: str,
+        provider_registry: ModelProviderRegistry,
+        semantic_judge,
+    ):
         nonlocal calls
         calls += 1
         if calls == 1:
             raise RuntimeError("deterministic orchestration failure")
-        real_run_execution(execution_id, provider_registry)
+        real_run_execution(execution_id, provider_registry, semantic_judge)
 
     monkeypatch.setattr(
         evaluation_runs_module,

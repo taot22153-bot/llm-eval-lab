@@ -129,13 +129,34 @@ if (-not $appPassword) {
     throw "MYSQL_APP_PASSWORD is missing from $credentialsPath."
 }
 
+$projectEnvPath = Join-Path $projectRoot ".env"
+$existingEnv = @{}
+if (Test-Path $projectEnvPath) {
+    $existingEnv = Read-KeyValueFile -Path $projectEnvPath
+}
+$semanticJudgeProvider = $existingEnv["SEMANTIC_JUDGE_PROVIDER"]
+if (-not $semanticJudgeProvider) {
+    $semanticJudgeProvider = "ollama"
+}
+$semanticJudgeModel = $existingEnv["SEMANTIC_JUDGE_MODEL"]
+if (-not $semanticJudgeModel) {
+    $semanticJudgeModel = "replace-with-an-installed-local-model"
+}
+$semanticJudgeThreshold = $existingEnv["SEMANTIC_JUDGE_LOW_CONFIDENCE_THRESHOLD"]
+if (-not $semanticJudgeThreshold) {
+    $semanticJudgeThreshold = "0.7"
+}
+
 $envContent = @"
 DATABASE_URL=mysql+pymysql://llm_eval_lab:$appPassword@127.0.0.1:3307/llm_eval_lab
 TEST_DATABASE_URL=mysql+pymysql://llm_eval_lab:$appPassword@127.0.0.1:3307/llm_eval_lab_test
 CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
+SEMANTIC_JUDGE_PROVIDER=$semanticJudgeProvider
+SEMANTIC_JUDGE_MODEL=$semanticJudgeModel
+SEMANTIC_JUDGE_LOW_CONFIDENCE_THRESHOLD=$semanticJudgeThreshold
 "@
 [System.IO.File]::WriteAllText(
-    (Join-Path $projectRoot ".env"),
+    $projectEnvPath,
     $envContent,
     [System.Text.UTF8Encoding]::new($false)
 )

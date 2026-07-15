@@ -26,6 +26,11 @@ from llm_eval_lab.models import ApplicationVersion
 from llm_eval_lab.models import TestCase as EvaluationTestCase
 from llm_eval_lab.models import TestCaseExecution as EvaluationTestCaseExecution
 from llm_eval_lab.sample_suite import seed_sample_evaluation_suite
+from llm_eval_lab.semantic_judging import (
+    SemanticJudgeRequest,
+    SemanticJudgeResult,
+    get_semantic_judge,
+)
 
 
 class DeterministicModelAdapter:
@@ -51,6 +56,26 @@ class UnavailableModelAdapter:
         raise ModelProviderFailure(
             "provider_unavailable",
             "Cannot reach the configured local model provider. Start it and retry.",
+        )
+
+
+class DeterministicSemanticJudge:
+    low_confidence_threshold = 0.7
+
+    def configuration_snapshot(self):
+        return {
+            "judge_version": "structured-semantic-v1",
+            "provider": "fixture-judge",
+            "model": "deterministic-semantic-judge",
+            "generation_parameters": {"temperature": 0},
+            "low_confidence_threshold": 0.7,
+        }
+
+    def judge(self, request: SemanticJudgeRequest) -> SemanticJudgeResult:
+        return SemanticJudgeResult(
+            outcome="fail",
+            rationale="The exact must-have phrasing is absent.",
+            confidence=0.95,
         )
 
 
@@ -90,6 +115,7 @@ def test_evaluation_user_can_execute_one_test_case_and_reopen_the_result():
 
     registry = ModelProviderRegistry({"ollama": DeterministicModelAdapter()})
     app.dependency_overrides[get_model_provider_registry] = lambda: registry
+    app.dependency_overrides[get_semantic_judge] = lambda: DeterministicSemanticJudge()
 
     with TestClient(app) as client:
         create_response = client.post(
@@ -174,6 +200,22 @@ def test_evaluation_user_can_execute_one_test_case_and_reopen_the_result():
                 },
             ],
         },
+        "semantic_evaluation": {
+            "judge_version": "structured-semantic-v1",
+            "outcome": "fail",
+            "rationale": "The exact must-have phrasing is absent.",
+            "confidence": 0.95,
+            "judge_configuration": {
+                "judge_version": "structured-semantic-v1",
+                "provider": "fixture-judge",
+                "model": "deterministic-semantic-judge",
+                "generation_parameters": {"temperature": 0},
+                "low_confidence_threshold": 0.7,
+            },
+            "error": None,
+            "created_at": detail_response.json()["semantic_evaluation"]["created_at"],
+        },
+        "human_review_item": None,
         "created_at": created["created_at"],
         "started_at": detail_response.json()["started_at"],
         "completed_at": detail_response.json()["completed_at"],
@@ -226,6 +268,8 @@ def test_provider_failure_is_persisted_without_corrupting_the_execution_record()
     assert failed["model_response"] is None
     assert failed["usage"] is None
     assert failed["deterministic_evaluation"] is None
+    assert failed["semantic_evaluation"] is None
+    assert failed["human_review_item"] is None
     assert failed["error"] == {
         "code": "provider_unavailable",
         "message": "Cannot reach the configured local model provider. Start it and retry.",

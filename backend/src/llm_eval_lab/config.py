@@ -8,6 +8,9 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173"
     ollama_base_url: str = "http://127.0.0.1:11434"
     ollama_timeout_seconds: float = 120
+    semantic_judge_provider: str = "ollama"
+    semantic_judge_model: str = "replace-with-an-installed-local-model"
+    semantic_judge_low_confidence_threshold: float = 0.7
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

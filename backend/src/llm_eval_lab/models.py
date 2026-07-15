@@ -9,6 +9,7 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     DateTime,
+    Float,
     ForeignKey,
     Integer,
     String,
@@ -188,6 +189,16 @@ class TestCaseExecution(Base):
         cascade="all, delete-orphan",
         uselist=False,
     )
+    semantic_evaluation: Mapped[SemanticEvaluation | None] = relationship(
+        back_populates="execution",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
+    human_review_item: Mapped[HumanReviewItem | None] = relationship(
+        back_populates="execution",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
 
 
 class DeterministicEvaluation(Base):
@@ -251,3 +262,71 @@ class DeterministicCheckOutcome(Base):
     passed: Mapped[bool] = mapped_column(Boolean)
     matched_evidence: Mapped[str | None] = mapped_column(Text, nullable=True)
     evaluation: Mapped[DeterministicEvaluation] = relationship(back_populates="outcomes")
+
+
+class SemanticEvaluation(Base):
+    __tablename__ = "semantic_evaluations"
+    __table_args__ = (
+        UniqueConstraint(
+            "test_case_execution_id",
+            name="uq_semantic_evaluation_execution",
+        ),
+        CheckConstraint(
+            "outcome IS NULL OR outcome IN ('pass', 'fail', 'insufficient_evidence')",
+            name="ck_semantic_evaluation_outcome",
+        ),
+        CheckConstraint(
+            "confidence IS NULL OR (confidence >= 0 AND confidence <= 1)",
+            name="ck_semantic_evaluation_confidence",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    test_case_execution_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("test_case_executions.id", ondelete="CASCADE"),
+    )
+    judge_version: Mapped[str] = mapped_column(String(80))
+    outcome: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    rationale: Mapped[str | None] = mapped_column(Text, nullable=True)
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    judge_configuration: Mapped[dict[str, Any]] = mapped_column(JSON)
+    error: Mapped[dict[str, str] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+    )
+    execution: Mapped[TestCaseExecution] = relationship(
+        back_populates="semantic_evaluation"
+    )
+
+
+class HumanReviewItem(Base):
+    __tablename__ = "human_review_items"
+    __table_args__ = (
+        UniqueConstraint(
+            "test_case_execution_id",
+            name="uq_human_review_item_execution",
+        ),
+        CheckConstraint(
+            "status IN ('pending', 'resolved')",
+            name="ck_human_review_item_status",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    test_case_execution_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("test_case_executions.id", ondelete="CASCADE"),
+    )
+    status: Mapped[str] = mapped_column(String(24), default="pending")
+    reasons: Mapped[list[str]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    execution: Mapped[TestCaseExecution] = relationship(back_populates="human_review_item")

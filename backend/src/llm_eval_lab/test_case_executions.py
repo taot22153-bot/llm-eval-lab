@@ -21,14 +21,24 @@ from llm_eval_lab.models import (
     DeterministicCheckOutcome,
     DeterministicEvaluation,
     EvaluationRun,
+    HumanReviewItem,
+    SemanticEvaluation,
     TestCase,
     TestCaseExecution,
 )
 from llm_eval_lab.schemas import TestCaseExecutionCreate, TestCaseExecutionRead
+from llm_eval_lab.semantic_judging import (
+    SemanticJudge,
+    SemanticJudgeFailure,
+    SemanticJudgeRequest,
+    get_semantic_judge,
+    human_review_reasons,
+)
 
 router = APIRouter(prefix="/api/test-case-executions", tags=["test case executions"])
 DatabaseSession = Annotated[Session, Depends(get_session)]
 ProviderRegistry = Annotated[ModelProviderRegistry, Depends(get_model_provider_registry)]
+SemanticJudgeDependency = Annotated[SemanticJudge, Depends(get_semantic_judge)]
 
 
 def _build_user_prompt(test_case: TestCase) -> str:
@@ -49,6 +59,8 @@ def _load_execution(session: Session, execution_id: str) -> TestCaseExecution | 
             selectinload(TestCaseExecution.deterministic_evaluation).selectinload(
                 DeterministicEvaluation.outcomes
             ),
+            selectinload(TestCaseExecution.semantic_evaluation),
+            selectinload(TestCaseExecution.human_review_item),
         )
     )
     return session.scalar(statement)
@@ -56,6 +68,8 @@ def _load_execution(session: Session, execution_id: str) -> TestCaseExecution | 
 
 def serialize_test_case_execution(execution: TestCaseExecution) -> dict[str, Any]:
     deterministic_evaluation = execution.deterministic_evaluation
+    semantic_evaluation = execution.semantic_evaluation
+    human_review_item = execution.human_review_item
     return {
         "id": execution.id,
         "application_version_id": execution.application_version_id,
@@ -89,6 +103,30 @@ def serialize_test_case_execution(execution: TestCaseExecution) -> dict[str, Any
                 ],
             }
             if deterministic_evaluation is not None
+            else None
+        ),
+        "semantic_evaluation": (
+            {
+                "judge_version": semantic_evaluation.judge_version,
+                "outcome": semantic_evaluation.outcome,
+                "rationale": semantic_evaluation.rationale,
+                "confidence": semantic_evaluation.confidence,
+                "judge_configuration": semantic_evaluation.judge_configuration,
+                "error": semantic_evaluation.error,
+                "created_at": semantic_evaluation.created_at,
+            }
+            if semantic_evaluation is not None
+            else None
+        ),
+        "human_review_item": (
+            {
+                "id": human_review_item.id,
+                "status": human_review_item.status,
+                "reasons": human_review_item.reasons,
+                "created_at": human_review_item.created_at,
+                "resolved_at": human_review_item.resolved_at,
+            }
+            if human_review_item is not None
             else None
         ),
         "created_at": execution.created_at,
@@ -126,6 +164,7 @@ def new_test_case_execution(
 def run_test_case_execution(
     execution_id: str,
     provider_registry: ModelProviderRegistry,
+    semantic_judge: SemanticJudge,
 ) -> None:
     with SessionLocal() as session:
         execution = _load_execution(session, execution_id)
@@ -147,6 +186,7 @@ def run_test_case_execution(
             )
             provider = provider_registry.get(str(prompt_context["model_provider"]))
             response = provider.generate(request)
+            execution.latency_ms = round((perf_counter() - started) * 1000)
         except ModelProviderFailure as failure:
             execution.status = "failed"
             execution.error = {"code": failure.code, "message": failure.message}
@@ -184,8 +224,61 @@ def run_test_case_execution(
                     for outcome in deterministic_score.outcomes
                 ],
             )
+            semantic_result = None
+            semantic_failure = None
+            try:
+                semantic_result = semantic_judge.judge(
+                    SemanticJudgeRequest(
+                        user_input=execution.test_case.user_input,
+                        grounding_material=execution.test_case.grounding_material,
+                        must_have_facts=execution.test_case.must_have_facts,
+                        forbidden_claims=execution.test_case.forbidden_claims,
+                        response=response.content,
+                    )
+                )
+            except SemanticJudgeFailure as failure:
+                semantic_failure = failure
+            except Exception:
+                semantic_failure = SemanticJudgeFailure(
+                    "judge_failure",
+                    "The semantic judge failed unexpectedly. Check the local judge logs.",
+                )
+
+            judge_configuration = semantic_judge.configuration_snapshot()
+            execution.semantic_evaluation = SemanticEvaluation(
+                judge_version=str(judge_configuration["judge_version"]),
+                outcome=semantic_result.outcome if semantic_result is not None else None,
+                rationale=(
+                    semantic_result.rationale if semantic_result is not None else None
+                ),
+                confidence=(
+                    semantic_result.confidence if semantic_result is not None else None
+                ),
+                judge_configuration=judge_configuration,
+                error=(
+                    {
+                        "code": semantic_failure.code,
+                        "message": semantic_failure.message,
+                    }
+                    if semantic_failure is not None
+                    else None
+                ),
+            )
+            review_reasons = human_review_reasons(
+                deterministic_passed=deterministic_score.passed,
+                semantic_result=semantic_result,
+                semantic_failure=semantic_failure,
+                requires_human_review=execution.test_case.requires_human_review,
+                low_confidence_threshold=semantic_judge.low_confidence_threshold,
+            )
+            if review_reasons:
+                execution.human_review_item = HumanReviewItem(
+                    status="pending",
+                    reasons=list(review_reasons),
+                )
         finally:
-            execution.latency_ms = round((perf_counter() - started) * 1000)
+            if execution.latency_ms is None:
+                execution.latency_ms = round((perf_counter() - started) * 1000)
             execution.completed_at = datetime.now(UTC)
             session.commit()
 
@@ -218,6 +311,7 @@ def create_test_case_execution(
     background_tasks: BackgroundTasks,
     session: DatabaseSession,
     provider_registry: ProviderRegistry,
+    semantic_judge: SemanticJudgeDependency,
 ) -> dict[str, Any]:
     application_version = session.get(ApplicationVersion, payload.application_version_id)
     if application_version is None:
@@ -238,7 +332,12 @@ def create_test_case_execution(
     session.refresh(execution)
 
     response = serialize_test_case_execution(execution)
-    background_tasks.add_task(run_test_case_execution, execution.id, provider_registry)
+    background_tasks.add_task(
+        run_test_case_execution,
+        execution.id,
+        provider_registry,
+        semantic_judge,
+    )
     return response
 
 
