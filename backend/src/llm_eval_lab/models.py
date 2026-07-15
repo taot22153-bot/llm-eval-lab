@@ -87,3 +87,37 @@ class TestCase(Base):
     severity: Mapped[str] = mapped_column(String(40))
     requires_human_review: Mapped[bool] = mapped_column(Boolean, default=False)
     suite: Mapped[EvaluationSuite] = relationship(back_populates="test_cases")
+
+
+class TestCaseExecution(Base):
+    __tablename__ = "test_case_executions"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'running', 'completed', 'failed')",
+            name="ck_test_case_execution_status",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    application_version_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("application_versions.id", ondelete="RESTRICT"),
+    )
+    test_case_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("test_cases.id", ondelete="RESTRICT"),
+    )
+    status: Mapped[str] = mapped_column(String(24), default="pending")
+    prompt_context: Mapped[dict[str, Any]] = mapped_column(JSON)
+    model_response: Mapped[str | None] = mapped_column(Text, nullable=True)
+    usage: Mapped[dict[str, int | None] | None] = mapped_column(JSON, nullable=True)
+    latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error: Mapped[dict[str, str] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+    )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    application_version: Mapped[ApplicationVersion] = relationship()
+    test_case: Mapped[TestCase] = relationship()

@@ -20,7 +20,8 @@ body {
 
 button,
 input,
-textarea {
+textarea,
+select {
   font: inherit;
 }
 
@@ -212,13 +213,120 @@ textarea {
 }
 
 input:focus,
-textarea:focus {
+textarea:focus,
+select:focus {
   border-color: #2479a9;
   box-shadow: 0 0 0 3px #dceef8;
 }
 
 textarea {
   resize: vertical;
+}
+
+select {
+  min-height: 40px;
+}
+
+.execution-workspace {
+  display: grid;
+  grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.execution-form,
+.execution-result {
+  border: 1px solid #d6dce3;
+  border-radius: 7px;
+  background: #ffffff;
+  padding: 18px;
+}
+
+.execution-form {
+  display: grid;
+  gap: 15px;
+}
+
+.execution-result__heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.execution-result__heading h2 {
+  margin: 0;
+  font-size: 19px;
+}
+
+.execution-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  background: #edf1f4;
+  color: #43515f;
+  padding: 6px 9px;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.execution-result--completed .execution-status {
+  background: #e7f4ed;
+  color: #176c49;
+}
+
+.execution-result--failed .execution-status {
+  background: #ffe4e1;
+  color: #8b2d24;
+}
+
+.model-response {
+  margin-top: 18px;
+  border-left: 3px solid #2479a9;
+  background: #f3f8fb;
+  padding: 12px 14px;
+}
+
+.model-response span {
+  color: #536170;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.model-response p {
+  margin: 6px 0 0;
+  line-height: 1.55;
+}
+
+.execution-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 18px 0 0;
+}
+
+.execution-metrics div {
+  border-top: 1px solid #e2e6eb;
+  padding-top: 11px;
+}
+
+.execution-metrics dt {
+  color: #75808c;
+  font-size: 10px;
+  font-weight: 750;
+  text-transform: uppercase;
+}
+
+.execution-metrics dd {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 5px 0 0;
+  color: #344250;
+  font-size: 12px;
+  overflow-wrap: anywhere;
 }
 
 .field-row {
@@ -715,6 +823,10 @@ pre {
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .execution-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .suite-browser {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -763,7 +875,8 @@ pre {
   }
 
   .field-row,
-  .version-metadata {
+  .version-metadata,
+  .execution-metrics {
     grid-template-columns: minmax(0, 1fr);
   }
 

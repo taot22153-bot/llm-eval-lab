@@ -75,6 +75,56 @@ const sampleSuiteDetail = {
   ],
 };
 
+const pendingExecution = {
+  id: "01-execution",
+  application_version_id: createdVersion.id,
+  application_version_name: createdVersion.name,
+  test_case_id: sampleSuiteDetail.test_cases[0].id,
+  test_case_key: sampleSuiteDetail.test_cases[0].key,
+  test_case_title: sampleSuiteDetail.test_cases[0].title,
+  status: "pending",
+  prompt_context: {
+    system_prompt: createdVersion.system_prompt,
+    grounding_material: sampleSuiteDetail.test_cases[0].grounding_material,
+    user_input: sampleSuiteDetail.test_cases[0].user_input,
+  },
+  model_response: null,
+  usage: null,
+  latency_ms: null,
+  error: null,
+  created_at: "2026-07-15T00:00:00Z",
+  started_at: null,
+  completed_at: null,
+};
+
+const completedExecution = {
+  ...pendingExecution,
+  status: "completed",
+  model_response: "The EchoBud X1 is available in black or silver.",
+  usage: { prompt_tokens: 42, completion_tokens: 11, total_tokens: 53 },
+  latency_ms: 125,
+  started_at: "2026-07-15T00:00:00Z",
+  completed_at: "2026-07-15T00:00:00.125Z",
+};
+
+const runningExecution = {
+  ...pendingExecution,
+  status: "running",
+  started_at: "2026-07-15T00:00:00Z",
+};
+
+const failedExecution = {
+  ...pendingExecution,
+  status: "failed",
+  latency_ms: 20,
+  error: {
+    code: "provider_unavailable",
+    message: "Cannot reach Ollama. Start it and retry.",
+  },
+  started_at: "2026-07-15T00:00:00Z",
+  completed_at: "2026-07-15T00:00:00.020Z",
+};
+
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -224,5 +274,114 @@ describe("Application Versions", () => {
     expect(screen.getByText("A lifetime warranty.")).toBeInTheDocument();
     expect(screen.getByText("Release blocking")).toBeInTheDocument();
     expect(screen.getByText("Human review required")).toBeInTheDocument();
+  });
+
+  it("executes one selected Test Case and shows the persisted result", async () => {
+    const user = userEvent.setup();
+    fetchMock
+      .mockReset()
+      .mockResolvedValueOnce(jsonResponse([createdVersion]))
+      .mockResolvedValueOnce(jsonResponse([sampleSuiteSummary]))
+      .mockResolvedValueOnce(jsonResponse(sampleSuiteDetail))
+      .mockResolvedValueOnce(jsonResponse(pendingExecution, 201))
+      .mockResolvedValueOnce(jsonResponse(completedExecution));
+
+    render(<App />);
+    expect(await screen.findByText(createdVersion.name)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Test Case Execution" }));
+    expect(await screen.findByRole("heading", { name: "Run one Test Case" })).toBeInTheDocument();
+    expect(await screen.findByLabelText("Application Version")).toHaveValue(createdVersion.id);
+    expect(screen.getByLabelText("Test Case")).toHaveValue(
+      sampleSuiteDetail.test_cases[0].id,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Run Test Case" }));
+
+    expect(await screen.findByText("Completed")).toBeInTheDocument();
+    expect(screen.getByText(completedExecution.model_response)).toBeInTheDocument();
+    expect(screen.getByText("125 ms")).toBeInTheDocument();
+    expect(screen.getByText("53 total tokens")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenNthCalledWith(4, "/api/test-case-executions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        application_version_id: createdVersion.id,
+        test_case_id: sampleSuiteDetail.test_cases[0].id,
+      }),
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      5,
+      `/api/test-case-executions/${pendingExecution.id}`,
+    );
+  });
+
+  it("shows an actionable provider failure as readable alert text", async () => {
+    const user = userEvent.setup();
+    fetchMock
+      .mockReset()
+      .mockResolvedValueOnce(jsonResponse([createdVersion]))
+      .mockResolvedValueOnce(jsonResponse([sampleSuiteSummary]))
+      .mockResolvedValueOnce(jsonResponse(sampleSuiteDetail))
+      .mockResolvedValueOnce(jsonResponse(pendingExecution, 201))
+      .mockResolvedValueOnce(jsonResponse(failedExecution));
+
+    render(<App />);
+    expect(await screen.findByText(createdVersion.name)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Test Case Execution" }));
+    await screen.findByLabelText("Test Case");
+    await user.click(screen.getByRole("button", { name: "Run Test Case" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "provider_unavailable Cannot reach Ollama. Start it and retry.",
+    );
+  });
+
+  it("shows pending and running lifecycle states before completion", async () => {
+    const user = userEvent.setup();
+    let resolveFirstPoll: (response: Response) => void = () => undefined;
+    fetchMock
+      .mockReset()
+      .mockResolvedValueOnce(jsonResponse([createdVersion]))
+      .mockResolvedValueOnce(jsonResponse([sampleSuiteSummary]))
+      .mockResolvedValueOnce(jsonResponse(sampleSuiteDetail))
+      .mockResolvedValueOnce(jsonResponse(pendingExecution, 201))
+      .mockImplementationOnce(
+        () => new Promise<Response>((resolve) => { resolveFirstPoll = resolve; }),
+      )
+      .mockResolvedValueOnce(jsonResponse(completedExecution));
+
+    render(<App />);
+    expect(await screen.findByText(createdVersion.name)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Test Case Execution" }));
+    await screen.findByLabelText("Test Case");
+    await user.click(screen.getByRole("button", { name: "Run Test Case" }));
+
+    expect((await screen.findAllByText("Pending")).length).toBeGreaterThan(0);
+    resolveFirstPoll(jsonResponse(runningExecution));
+    expect(await screen.findByText("Running")).toBeInTheDocument();
+    expect(await screen.findByText("Completed")).toBeInTheDocument();
+  });
+
+  it("selects an Application Version that finishes loading after the workspace opens", async () => {
+    const user = userEvent.setup();
+    let resolveVersions: (response: Response) => void = () => undefined;
+    fetchMock
+      .mockReset()
+      .mockImplementationOnce(
+        () => new Promise<Response>((resolve) => { resolveVersions = resolve; }),
+      )
+      .mockResolvedValueOnce(jsonResponse([sampleSuiteSummary]))
+      .mockResolvedValueOnce(jsonResponse(sampleSuiteDetail));
+
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Test Case Execution" }));
+    await screen.findByLabelText("Test Case");
+    resolveVersions(jsonResponse([createdVersion]));
+
+    expect(await screen.findByLabelText("Application Version")).toHaveValue(createdVersion.id);
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Run Test Case" })).toBeEnabled();
+    });
   });
 });
