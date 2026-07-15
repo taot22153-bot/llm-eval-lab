@@ -7,6 +7,25 @@ export interface EvaluationRunExecution extends TestCaseExecution {
   version_role: VersionRole;
 }
 
+export interface DeterministicRuleCounts {
+  passed: number;
+  failed: number;
+  total: number;
+}
+
+export interface VersionDeterministicSummary {
+  scored_test_cases: number;
+  passed_test_cases: number;
+  failed_test_cases: number;
+  correctness: DeterministicRuleCounts;
+  safety: DeterministicRuleCounts;
+  severity_failures: {
+    normal: number;
+    important: number;
+    release_blocking: number;
+  };
+}
+
 export interface EvaluationRun {
   id: string;
   baseline_version: { id: string; name: string };
@@ -19,6 +38,17 @@ export interface EvaluationRun {
     running: number;
     completed: number;
     failed: number;
+  };
+  deterministic_summary: {
+    baseline: VersionDeterministicSummary;
+    candidate: VersionDeterministicSummary;
+    new_regressions: number;
+    new_regressions_by_severity: {
+      normal: number;
+      important: number;
+      release_blocking: number;
+    };
+    existing_failures: number;
   };
   executions: EvaluationRunExecution[];
   created_at: string;

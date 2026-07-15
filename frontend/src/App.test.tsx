@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -90,6 +90,7 @@ const pendingExecution = {
   test_case_id: sampleSuiteDetail.test_cases[0].id,
   test_case_key: sampleSuiteDetail.test_cases[0].key,
   test_case_title: sampleSuiteDetail.test_cases[0].title,
+  test_case_severity: sampleSuiteDetail.test_cases[0].severity,
   status: "pending",
   prompt_context: {
     system_prompt: createdVersion.system_prompt,
@@ -145,6 +146,27 @@ const pendingEvaluationRun = {
   },
   status: "pending",
   progress: { total: 4, queued: 4, running: 0, completed: 0, failed: 0 },
+  deterministic_summary: {
+    baseline: {
+      scored_test_cases: 0,
+      passed_test_cases: 0,
+      failed_test_cases: 0,
+      correctness: { passed: 0, failed: 0, total: 0 },
+      safety: { passed: 0, failed: 0, total: 0 },
+      severity_failures: { normal: 0, important: 0, release_blocking: 0 },
+    },
+    candidate: {
+      scored_test_cases: 0,
+      passed_test_cases: 0,
+      failed_test_cases: 0,
+      correctness: { passed: 0, failed: 0, total: 0 },
+      safety: { passed: 0, failed: 0, total: 0 },
+      severity_failures: { normal: 0, important: 0, release_blocking: 0 },
+    },
+    new_regressions: 0,
+    new_regressions_by_severity: { normal: 0, important: 0, release_blocking: 0 },
+    existing_failures: 0,
+  },
   executions: [
     { ...pendingExecution, version_role: "baseline" },
     {
@@ -197,6 +219,70 @@ const runningEvaluationRun = {
     },
   ],
   started_at: "2026-07-15T00:00:00Z",
+};
+
+const scoredEvaluationRun = {
+  ...completedEvaluationRun,
+  deterministic_summary: {
+    baseline: {
+      scored_test_cases: 1,
+      passed_test_cases: 1,
+      failed_test_cases: 0,
+      correctness: { passed: 1, failed: 0, total: 1 },
+      safety: { passed: 1, failed: 0, total: 1 },
+      severity_failures: { normal: 0, important: 0, release_blocking: 0 },
+    },
+    candidate: {
+      scored_test_cases: 1,
+      passed_test_cases: 0,
+      failed_test_cases: 1,
+      correctness: { passed: 1, failed: 0, total: 1 },
+      safety: { passed: 0, failed: 1, total: 1 },
+      severity_failures: { normal: 0, important: 0, release_blocking: 1 },
+    },
+    new_regressions: 1,
+    new_regressions_by_severity: { normal: 0, important: 0, release_blocking: 1 },
+    existing_failures: 0,
+  },
+  executions: [
+    {
+      ...completedExecution,
+      test_case_key: "new-regression-case",
+      test_case_title: "Surface a new release-blocking regression",
+      test_case_severity: "release_blocking",
+      model_response: "Secure answer.",
+      version_role: "baseline",
+      deterministic_evaluation: {
+        scorer_version: "exact-phrase-v1",
+        passed: true,
+        regression_classification: null,
+        outcomes: [
+          { check_type: "must_have_fact", position: 1, rule: "Secure answer.", passed: true, matched_evidence: "Secure answer." },
+          { check_type: "forbidden_claim", position: 2, rule: "Leaked secret.", passed: true, matched_evidence: null },
+        ],
+      },
+    },
+    {
+      ...completedExecution,
+      id: "02-execution",
+      application_version_id: candidateVersion.id,
+      application_version_name: candidateVersion.name,
+      test_case_key: "new-regression-case",
+      test_case_title: "Surface a new release-blocking regression",
+      test_case_severity: "release_blocking",
+      model_response: "Secure answer. Leaked secret.",
+      version_role: "candidate",
+      deterministic_evaluation: {
+        scorer_version: "exact-phrase-v1",
+        passed: false,
+        regression_classification: "new_regression",
+        outcomes: [
+          { check_type: "must_have_fact", position: 1, rule: "Secure answer.", passed: true, matched_evidence: "Secure answer." },
+          { check_type: "forbidden_claim", position: 2, rule: "Leaked secret.", passed: false, matched_evidence: "Leaked secret." },
+        ],
+      },
+    },
+  ],
 };
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -533,5 +619,34 @@ describe("Application Versions", () => {
       .toHaveTextContent("1");
     expect(await screen.findByText("Baseline answer from evidence.")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenNthCalledWith(4, `/api/evaluation-runs/${runningEvaluationRun.id}`);
+  });
+
+  it("opens a new regression and shows exact deterministic rule evidence", async () => {
+    const user = userEvent.setup();
+    fetchMock
+      .mockReset()
+      .mockResolvedValueOnce(jsonResponse([createdVersion, candidateVersion]))
+      .mockResolvedValueOnce(jsonResponse([sampleSuiteSummary]))
+      .mockResolvedValueOnce(jsonResponse([scoredEvaluationRun]));
+
+    render(<App />);
+    expect(await screen.findByText(createdVersion.name)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Evaluation Runs" }));
+
+    expect(await screen.findByText("1 new regression")).toBeInTheDocument();
+    const candidateEvidence = screen.getByRole("region", { name: "candidate evidence" });
+    expect(within(candidateEvidence).getByText("New regression")).toBeInTheDocument();
+    expect(within(candidateEvidence).getByText("Severity: Release blocking")).toBeInTheDocument();
+    expect(within(candidateEvidence).getByText("Secure answer. Leaked secret.")).toBeInTheDocument();
+    await user.click(within(candidateEvidence).getByText("Inspect rule evidence"));
+
+    expect(within(candidateEvidence).getByText("Forbidden claim")).toBeInTheDocument();
+    expect(within(candidateEvidence).getByText("Leaked secret.")).toBeInTheDocument();
+    expect(
+      within(candidateEvidence).getByText("Matched response: Leaked secret."),
+    ).toBeInTheDocument();
+    expect(within(candidateEvidence).getByText("Release blocking: 1")).toBeInTheDocument();
+    const scoreSummary = screen.getByRole("region", { name: "Deterministic score summary" });
+    expect(within(scoreSummary).getByText("Release-blocking regressions: 1")).toBeInTheDocument();
   });
 });

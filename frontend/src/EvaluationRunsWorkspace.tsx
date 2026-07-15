@@ -6,6 +6,7 @@ import { EvaluationSuiteSummary, listEvaluationSuites } from "./evaluationSuites
 import {
   EvaluationRun,
   EvaluationRunExecution,
+  VersionDeterministicSummary,
   VersionRole,
   createEvaluationRun,
   getEvaluationRun,
@@ -18,14 +19,77 @@ function waitForNextPoll(): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, POLL_INTERVAL_MS));
 }
 
+function SeverityFailures({ summary }: { summary: VersionDeterministicSummary }) {
+  return (
+    <>
+      <span>Normal: {summary.severity_failures.normal}</span>
+      <span>Important: {summary.severity_failures.important}</span>
+      <span>Release blocking: {summary.severity_failures.release_blocking}</span>
+    </>
+  );
+}
+
+function severityLabel(severity: EvaluationRunExecution["test_case_severity"]): string {
+  return severity === "release_blocking"
+    ? "Release blocking"
+    : severity[0].toUpperCase() + severity.slice(1);
+}
+
 function ExecutionEvidence({ execution }: { execution: EvaluationRunExecution }) {
+  const deterministicEvaluation = execution.deterministic_evaluation ?? null;
+  const regressionLabel = deterministicEvaluation?.regression_classification === "new_regression"
+    ? "New regression"
+    : deterministicEvaluation?.regression_classification === "existing_failure"
+      ? "Existing failure"
+      : null;
   return (
     <article className={`comparison-evidence comparison-evidence--${execution.status}`}>
       <div className="comparison-evidence__heading">
         <strong>{execution.test_case_title}</strong>
         <span>{execution.status}</span>
       </div>
+      <p className="test-case-severity">
+        Severity: {severityLabel(execution.test_case_severity)}
+      </p>
       {execution.model_response ? <p>{execution.model_response}</p> : null}
+      {deterministicEvaluation ? (
+        <div className="deterministic-evaluation">
+          <div className="deterministic-evaluation__status">
+            <span className={deterministicEvaluation.passed ? "rule-pass" : "rule-fail"}>
+              {deterministicEvaluation.passed ? "Deterministic pass" : "Deterministic failure"}
+            </span>
+            {regressionLabel ? <strong>{regressionLabel}</strong> : null}
+          </div>
+          {!deterministicEvaluation.passed || regressionLabel ? (
+            <details className="rule-evidence">
+              <summary>Inspect rule evidence</summary>
+              <p className="rule-evidence__version">
+                Scorer {deterministicEvaluation.scorer_version}
+              </p>
+              <ol>
+                {deterministicEvaluation.outcomes.map((outcome) => (
+                  <li key={`${outcome.check_type}-${outcome.position}`}>
+                    <div>
+                      <strong>
+                        {outcome.check_type === "must_have_fact" ? "Must-have fact" : "Forbidden claim"}
+                      </strong>
+                      <span className={outcome.passed ? "rule-pass" : "rule-fail"}>
+                        {outcome.passed ? "Pass" : "Fail"}
+                      </span>
+                    </div>
+                    <p>{outcome.rule}</p>
+                    <small>
+                      {outcome.matched_evidence
+                        ? `Matched response: ${outcome.matched_evidence}`
+                        : "No matching evidence found."}
+                    </small>
+                  </li>
+                ))}
+              </ol>
+            </details>
+          ) : null}
+        </div>
+      ) : null}
       {execution.error ? (
         <div className="comparison-error">
           <strong>{execution.error.code}</strong>
@@ -39,13 +103,47 @@ function ExecutionEvidence({ execution }: { execution: EvaluationRunExecution })
   );
 }
 
+function VersionScoreSummary({
+  label,
+  summary,
+}: {
+  label: string;
+  summary: VersionDeterministicSummary;
+}) {
+  return (
+    <article className="score-summary-card">
+      <div className="score-summary-card__heading">
+        <strong>{label}</strong>
+        <span>{summary.passed_test_cases}/{summary.scored_test_cases} test cases passed</span>
+      </div>
+      <dl>
+        <div>
+          <dt>Correctness</dt>
+          <dd>{summary.correctness.passed}/{summary.correctness.total}</dd>
+        </div>
+        <div>
+          <dt>Safety</dt>
+          <dd>{summary.safety.passed}/{summary.safety.total}</dd>
+        </div>
+        <div>
+          <dt>Failed test cases</dt>
+          <dd>{summary.failed_test_cases}</dd>
+        </div>
+      </dl>
+      <p className="severity-summary"><SeverityFailures summary={summary} /></p>
+    </article>
+  );
+}
+
 function VersionEvidence({ run, role }: { run: EvaluationRun; role: VersionRole }) {
   const version = role === "baseline" ? run.baseline_version : run.candidate_version;
+  const summary = run.deterministic_summary[role];
   const executions = run.executions.filter((execution) => execution.version_role === role);
   return (
     <section className="comparison-column" aria-label={`${role} evidence`}>
       <p className="eyebrow">{role}</p>
       <h2>{version.name}</h2>
+      <p className="comparison-column__severity"><SeverityFailures summary={summary} /></p>
       <div className="comparison-evidence-list">
         {executions.map((execution) => (
           <ExecutionEvidence key={execution.id} execution={execution} />
@@ -87,6 +185,23 @@ function EvaluationRunResult({ run }: { run: EvaluationRun }) {
           </div>
         ))}
       </dl>
+      <section className="deterministic-summary" aria-label="Deterministic score summary">
+        <div className="regression-summary">
+          <div>
+            <strong>{run.deterministic_summary.new_regressions} new regression{run.deterministic_summary.new_regressions === 1 ? "" : "s"}</strong>
+            <span>{run.deterministic_summary.existing_failures} existing failure{run.deterministic_summary.existing_failures === 1 ? "" : "s"}</span>
+          </div>
+          <div className="regression-severity-summary">
+            <span>Normal regressions: {run.deterministic_summary.new_regressions_by_severity.normal}</span>
+            <span>Important regressions: {run.deterministic_summary.new_regressions_by_severity.important}</span>
+            <span>Release-blocking regressions: {run.deterministic_summary.new_regressions_by_severity.release_blocking}</span>
+          </div>
+        </div>
+        <div className="score-summary-grid">
+          <VersionScoreSummary label="Baseline" summary={run.deterministic_summary.baseline} />
+          <VersionScoreSummary label="Candidate" summary={run.deterministic_summary.candidate} />
+        </div>
+      </section>
       <div className="comparison-columns">
         <VersionEvidence run={run} role="baseline" />
         <VersionEvidence run={run} role="candidate" />

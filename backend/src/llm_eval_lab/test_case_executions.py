@@ -9,13 +9,21 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from llm_eval_lab.database import SessionLocal, get_session
+from llm_eval_lab.deterministic_scoring import VersionedDeterministicScorer
 from llm_eval_lab.model_provider import (
     ModelProviderFailure,
     ModelProviderRegistry,
     ModelRequest,
     get_model_provider_registry,
 )
-from llm_eval_lab.models import ApplicationVersion, EvaluationRun, TestCase, TestCaseExecution
+from llm_eval_lab.models import (
+    ApplicationVersion,
+    DeterministicCheckOutcome,
+    DeterministicEvaluation,
+    EvaluationRun,
+    TestCase,
+    TestCaseExecution,
+)
 from llm_eval_lab.schemas import TestCaseExecutionCreate, TestCaseExecutionRead
 
 router = APIRouter(prefix="/api/test-case-executions", tags=["test case executions"])
@@ -38,12 +46,16 @@ def _load_execution(session: Session, execution_id: str) -> TestCaseExecution | 
         .options(
             selectinload(TestCaseExecution.application_version),
             selectinload(TestCaseExecution.test_case),
+            selectinload(TestCaseExecution.deterministic_evaluation).selectinload(
+                DeterministicEvaluation.outcomes
+            ),
         )
     )
     return session.scalar(statement)
 
 
 def serialize_test_case_execution(execution: TestCaseExecution) -> dict[str, Any]:
+    deterministic_evaluation = execution.deterministic_evaluation
     return {
         "id": execution.id,
         "application_version_id": execution.application_version_id,
@@ -51,12 +63,34 @@ def serialize_test_case_execution(execution: TestCaseExecution) -> dict[str, Any
         "test_case_id": execution.test_case_id,
         "test_case_key": execution.test_case.key,
         "test_case_title": execution.test_case.title,
+        "test_case_severity": execution.test_case.severity,
         "status": execution.status,
         "prompt_context": execution.prompt_context,
         "model_response": execution.model_response,
         "usage": execution.usage,
         "latency_ms": execution.latency_ms,
         "error": execution.error,
+        "deterministic_evaluation": (
+            {
+                "scorer_version": deterministic_evaluation.scorer_version,
+                "passed": deterministic_evaluation.passed,
+                "regression_classification": (
+                    deterministic_evaluation.regression_classification
+                ),
+                "outcomes": [
+                    {
+                        "check_type": outcome.check_type,
+                        "position": outcome.position,
+                        "rule": outcome.rule,
+                        "passed": outcome.passed,
+                        "matched_evidence": outcome.matched_evidence,
+                    }
+                    for outcome in deterministic_evaluation.outcomes
+                ],
+            }
+            if deterministic_evaluation is not None
+            else None
+        ),
         "created_at": execution.created_at,
         "started_at": execution.started_at,
         "completed_at": execution.completed_at,
@@ -130,6 +164,26 @@ def run_test_case_execution(
                 "completion_tokens": response.usage.completion_tokens,
                 "total_tokens": response.usage.total_tokens,
             }
+            deterministic_score = VersionedDeterministicScorer().score(
+                response=response.content,
+                must_have_facts=execution.test_case.must_have_facts,
+                forbidden_claims=execution.test_case.forbidden_claims,
+            )
+            execution.deterministic_evaluation = DeterministicEvaluation(
+                scorer_version=deterministic_score.scorer_version,
+                passed=deterministic_score.passed,
+                regression_classification=None,
+                outcomes=[
+                    DeterministicCheckOutcome(
+                        check_type=outcome.check_type,
+                        position=outcome.position,
+                        rule=outcome.rule,
+                        passed=outcome.passed,
+                        matched_evidence=outcome.matched_evidence,
+                    )
+                    for outcome in deterministic_score.outcomes
+                ],
+            )
         finally:
             execution.latency_ms = round((perf_counter() - started) * 1000)
             execution.completed_at = datetime.now(UTC)

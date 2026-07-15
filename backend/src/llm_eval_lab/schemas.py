@@ -78,6 +78,21 @@ class ModelFailureRead(BaseModel):
     message: str
 
 
+class DeterministicCheckOutcomeRead(BaseModel):
+    check_type: Literal["must_have_fact", "forbidden_claim"]
+    position: int
+    rule: str
+    passed: bool
+    matched_evidence: str | None
+
+
+class DeterministicEvaluationRead(BaseModel):
+    scorer_version: str
+    passed: bool
+    regression_classification: Literal["new_regression", "existing_failure"] | None
+    outcomes: list[DeterministicCheckOutcomeRead]
+
+
 class TestCaseExecutionRead(BaseModel):
     id: str
     application_version_id: str
@@ -85,12 +100,14 @@ class TestCaseExecutionRead(BaseModel):
     test_case_id: str
     test_case_key: str
     test_case_title: str
+    test_case_severity: Literal["normal", "important", "release_blocking"]
     status: Literal["pending", "running", "completed", "failed"]
     prompt_context: dict[str, JsonValue]
     model_response: str | None
     usage: ModelUsageRead | None
     latency_ms: int | None
     error: ModelFailureRead | None
+    deterministic_evaluation: DeterministicEvaluationRead | None
     created_at: datetime
     started_at: datetime | None
     completed_at: datetime | None
@@ -130,6 +147,35 @@ class EvaluationRunProgressRead(BaseModel):
     failed: int
 
 
+class DeterministicRuleCountsRead(BaseModel):
+    passed: int
+    failed: int
+    total: int
+
+
+class SeverityFailuresRead(BaseModel):
+    normal: int
+    important: int
+    release_blocking: int
+
+
+class VersionDeterministicSummaryRead(BaseModel):
+    scored_test_cases: int
+    passed_test_cases: int
+    failed_test_cases: int
+    correctness: DeterministicRuleCountsRead
+    safety: DeterministicRuleCountsRead
+    severity_failures: SeverityFailuresRead
+
+
+class EvaluationRunDeterministicSummaryRead(BaseModel):
+    baseline: VersionDeterministicSummaryRead
+    candidate: VersionDeterministicSummaryRead
+    new_regressions: int
+    new_regressions_by_severity: SeverityFailuresRead
+    existing_failures: int
+
+
 class EvaluationRunExecutionRead(TestCaseExecutionRead):
     version_role: Literal["baseline", "candidate"]
 
@@ -141,6 +187,7 @@ class EvaluationRunRead(BaseModel):
     evaluation_suite: EvaluationRunSuiteRead
     status: Literal["pending", "running", "completed", "failed"]
     progress: EvaluationRunProgressRead
+    deterministic_summary: EvaluationRunDeterministicSummaryRead
     executions: list[EvaluationRunExecutionRead]
     created_at: datetime
     started_at: datetime | None
