@@ -8,6 +8,7 @@ from llm_eval_lab.config import get_settings
 from llm_eval_lab.evaluation_runs import reconcile_interrupted_evaluation_runs
 from llm_eval_lab.evaluation_runs import router as evaluation_runs_router
 from llm_eval_lab.evaluation_suites import router as evaluation_suites_router
+from llm_eval_lab.human_review import router as human_review_router
 from llm_eval_lab.test_case_executions import reconcile_interrupted_test_case_executions
 from llm_eval_lab.test_case_executions import router as test_case_executions_router
 
@@ -31,3 +32,4 @@ app.include_router(application_versions_router)
 app.include_router(evaluation_suites_router)
 app.include_router(evaluation_runs_router)
 app.include_router(test_case_executions_router)
+app.include_router(human_review_router)

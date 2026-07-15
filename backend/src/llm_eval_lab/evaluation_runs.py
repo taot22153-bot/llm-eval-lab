@@ -19,6 +19,7 @@ from llm_eval_lab.models import (
     TestCaseExecution,
 )
 from llm_eval_lab.schemas import EvaluationRunCreate, EvaluationRunRead
+from llm_eval_lab.semantic_judging import SemanticJudge, get_semantic_judge
 from llm_eval_lab.test_case_executions import (
     new_test_case_execution,
     run_test_case_execution,
@@ -28,6 +29,7 @@ from llm_eval_lab.test_case_executions import (
 router = APIRouter(prefix="/api/evaluation-runs", tags=["evaluation runs"])
 DatabaseSession = Annotated[Session, Depends(get_session)]
 ProviderRegistry = Annotated[ModelProviderRegistry, Depends(get_model_provider_registry)]
+SemanticJudgeDependency = Annotated[SemanticJudge, Depends(get_semantic_judge)]
 
 
 def _evaluation_run_statement():
@@ -44,6 +46,12 @@ def _evaluation_run_statement():
         selectinload(EvaluationRun.executions)
         .selectinload(TestCaseExecution.deterministic_evaluation)
         .selectinload(DeterministicEvaluation.outcomes),
+        selectinload(EvaluationRun.executions).selectinload(
+            TestCaseExecution.semantic_evaluation
+        ),
+        selectinload(EvaluationRun.executions).selectinload(
+            TestCaseExecution.human_review_item
+        ),
     )
 
 
@@ -204,7 +212,11 @@ def _evaluation_run_payload(evaluation_run: EvaluationRun) -> dict[str, Any]:
     }
 
 
-def run_evaluation_run(run_id: str, provider_registry: ModelProviderRegistry) -> None:
+def run_evaluation_run(
+    run_id: str,
+    provider_registry: ModelProviderRegistry,
+    semantic_judge: SemanticJudge,
+) -> None:
     with SessionLocal() as session:
         evaluation_run = _load_evaluation_run(session, run_id)
         if evaluation_run is None or evaluation_run.status != "pending":
@@ -217,7 +229,7 @@ def run_evaluation_run(run_id: str, provider_registry: ModelProviderRegistry) ->
     orchestration_failed = False
     for execution_id in execution_ids:
         try:
-            run_test_case_execution(execution_id, provider_registry)
+            run_test_case_execution(execution_id, provider_registry, semantic_judge)
         except Exception:
             orchestration_failed = True
             with SessionLocal() as session:
@@ -266,6 +278,7 @@ def create_evaluation_run(
     background_tasks: BackgroundTasks,
     session: DatabaseSession,
     provider_registry: ProviderRegistry,
+    semantic_judge: SemanticJudgeDependency,
 ) -> dict[str, Any]:
     if payload.baseline_version_id == payload.candidate_version_id:
         raise HTTPException(
@@ -315,7 +328,12 @@ def create_evaluation_run(
         raise RuntimeError("The Evaluation Run was not persisted.")
 
     response = _evaluation_run_payload(evaluation_run)
-    background_tasks.add_task(run_evaluation_run, evaluation_run.id, provider_registry)
+    background_tasks.add_task(
+        run_evaluation_run,
+        evaluation_run.id,
+        provider_registry,
+        semantic_judge,
+    )
     return response
 
 

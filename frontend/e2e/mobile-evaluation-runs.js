@@ -38,6 +38,24 @@ async (page) => {
     },
     severity_counts: { normal: 1, important: 0, release_blocking: 0 },
   };
+  const suiteDetail = {
+    ...suite,
+    test_cases: [
+      {
+        id: "mobile-case",
+        key: "mobile-case",
+        position: 1,
+        title: "Keep all progress evidence readable",
+        user_input: "Summarize the policy.",
+        grounding_material: [],
+        must_have_facts: [],
+        forbidden_claims: [],
+        test_type: "normal",
+        severity: "normal",
+        requires_human_review: false,
+      },
+    ],
+  };
   const execution = (role) => ({
     id: `${role}-execution`,
     application_version_id: `${role}-version`,
@@ -62,6 +80,30 @@ async (page) => {
       regression_classification: null,
       outcomes: [],
     },
+    semantic_evaluation: {
+      judge_version: "structured-semantic-v1",
+      outcome: role === "baseline" ? "pass" : "fail",
+      rationale: role === "baseline"
+        ? "The answer is supported by the fixture evidence."
+        : "The candidate meaning conflicts with the deterministic result.",
+      confidence: 0.91,
+      judge_configuration: {
+        judge_version: "structured-semantic-v1",
+        provider: "fixture-judge",
+        model: "responsive-judge-v1",
+        generation_parameters: { temperature: 0 },
+        low_confidence_threshold: 0.7,
+      },
+      error: null,
+      created_at: "2026-07-15T00:00:00Z",
+    },
+    human_review_item: role === "candidate" ? {
+      id: "mobile-review",
+      status: "pending",
+      reasons: ["automatic_conflict"],
+      created_at: "2026-07-15T00:00:00Z",
+      resolved_at: null,
+    } : null,
     version_role: role,
     created_at: "2026-07-15T00:00:00Z",
     started_at: "2026-07-15T00:00:00Z",
@@ -74,6 +116,35 @@ async (page) => {
     correctness: { passed: 0, failed: 0, total: 0 },
     safety: { passed: 0, failed: 0, total: 0 },
     severity_failures: { normal: 0, important: 0, release_blocking: 0 },
+  };
+  const singleExecution = {
+    ...execution("baseline"),
+    id: "single-execution",
+    semantic_evaluation: {
+      judge_version: "structured-semantic-v1",
+      outcome: null,
+      rationale: null,
+      confidence: null,
+      judge_configuration: {
+        judge_version: "structured-semantic-v1",
+        provider: "ollama",
+        model: "missing-local-judge",
+        generation_parameters: { temperature: 0 },
+        low_confidence_threshold: 0.7,
+      },
+      error: {
+        code: "provider_unavailable",
+        message: "Cannot reach the configured local semantic judge.",
+      },
+      created_at: "2026-07-15T00:00:00Z",
+    },
+    human_review_item: {
+      id: "single-review",
+      status: "pending",
+      reasons: ["judge_failure"],
+      created_at: "2026-07-15T00:00:00Z",
+      resolved_at: null,
+    },
   };
   const run = {
     id: "mobile-run",
@@ -99,6 +170,20 @@ async (page) => {
     started_at: "2026-07-15T00:00:00Z",
     completed_at: "2026-07-15T00:00:01Z",
   };
+  const reviewItems = [
+    {
+      id: "mobile-review",
+      test_case_execution_id: "candidate-execution",
+      test_case_title: "Keep all progress evidence readable",
+      application_version_name: "Mobile candidate",
+      evaluation_run_id: run.id,
+      version_role: "candidate",
+      status: "pending",
+      reasons: ["automatic_conflict"],
+      created_at: "2026-07-15T00:00:00Z",
+      resolved_at: null,
+    },
+  ];
 
   const consoleIssues = [];
   page.on("console", (message) => {
@@ -113,7 +198,10 @@ async (page) => {
     let body;
     if (pathname === "/api/application-versions") body = versions;
     else if (pathname === "/api/evaluation-suites") body = [suite];
+    else if (pathname === `/api/evaluation-suites/${suite.id}`) body = suiteDetail;
     else if (pathname === "/api/evaluation-runs") body = [run];
+    else if (pathname === "/api/human-review-items") body = reviewItems;
+    else if (pathname === "/api/test-case-executions") body = singleExecution;
     else body = { detail: `Unexpected browser fixture request: ${pathname}` };
     await route.fulfill({
       status: body.detail ? 404 : 200,
@@ -169,8 +257,23 @@ async (page) => {
   await page.getByRole("heading", { name: "Application Versions" }).waitFor();
   await page.getByRole("button", { name: "Evaluation Runs" }).click();
   await page.getByText("Latest persisted run").waitFor();
+  await page.getByRole("region", { name: "Human Review queue" }).waitFor();
+  await page.getByText("1 unresolved").waitFor();
+  await page.getByText("Semantic fail").waitFor();
   await assertViewport(390, 844, 3);
   await assertViewport(1440, 1000, 5);
+  await page.getByRole("button", { name: "Test Case Execution" }).click();
+  await page.getByRole("button", { name: "Run Test Case" }).click();
+  await page.getByText("Semantic judge failed").waitFor();
+  await page.getByText("Pending human review").waitFor();
+  await page.setViewportSize({ width: 390, height: 844 });
+  const singleExecutionWidth = await page.evaluate(() => ({
+    client: document.documentElement.clientWidth,
+    scroll: document.documentElement.scrollWidth,
+  }));
+  if (singleExecutionWidth.client !== singleExecutionWidth.scroll) {
+    throw new Error(`Single execution overflow: ${JSON.stringify(singleExecutionWidth)}`);
+  }
   if (consoleIssues.length > 0) {
     throw new Error(`Browser console issues: ${consoleIssues.join("\n")}`);
   }

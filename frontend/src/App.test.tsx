@@ -116,6 +116,49 @@ const completedExecution = {
   completed_at: "2026-07-15T00:00:00.125Z",
 };
 
+const judgedFailureExecution = {
+  ...completedExecution,
+  deterministic_evaluation: {
+    scorer_version: "exact-phrase-v1",
+    passed: true,
+    regression_classification: null,
+    outcomes: [
+      {
+        check_type: "must_have_fact",
+        position: 1,
+        rule: "The available colors are black and silver.",
+        passed: true,
+        matched_evidence: "black or silver",
+      },
+    ],
+  },
+  semantic_evaluation: {
+    judge_version: "structured-semantic-v1",
+    outcome: null,
+    rationale: null,
+    confidence: null,
+    judge_configuration: {
+      judge_version: "structured-semantic-v1",
+      provider: "ollama",
+      model: "local-judge-model",
+      generation_parameters: { temperature: 0 },
+      low_confidence_threshold: 0.7,
+    },
+    error: {
+      code: "provider_unavailable",
+      message: "Cannot reach the configured local semantic judge.",
+    },
+    created_at: "2026-07-15T00:00:00.125Z",
+  },
+  human_review_item: {
+    id: "single-review",
+    status: "pending",
+    reasons: ["judge_failure"],
+    created_at: "2026-07-15T00:00:00.125Z",
+    resolved_at: null,
+  },
+};
+
 const runningExecution = {
   ...pendingExecution,
   status: "running",
@@ -261,6 +304,22 @@ const scoredEvaluationRun = {
           { check_type: "forbidden_claim", position: 2, rule: "Leaked secret.", passed: true, matched_evidence: null },
         ],
       },
+      semantic_evaluation: {
+        judge_version: "structured-semantic-v1",
+        outcome: "pass",
+        rationale: "The response is fully supported by the supplied evidence.",
+        confidence: 0.96,
+        judge_configuration: {
+          judge_version: "structured-semantic-v1",
+          provider: "fixture-judge",
+          model: "independent-judge-v1",
+          generation_parameters: { temperature: 0 },
+          low_confidence_threshold: 0.7,
+        },
+        error: null,
+        created_at: "2026-07-15T00:00:01Z",
+      },
+      human_review_item: null,
     },
     {
       ...completedExecution,
@@ -281,9 +340,61 @@ const scoredEvaluationRun = {
           { check_type: "forbidden_claim", position: 2, rule: "Leaked secret.", passed: false, matched_evidence: "Leaked secret." },
         ],
       },
+      semantic_evaluation: {
+        judge_version: "structured-semantic-v1",
+        outcome: "pass",
+        rationale: "The main answer remains useful despite the literal-rule mismatch.",
+        confidence: 0.86,
+        judge_configuration: {
+          judge_version: "structured-semantic-v1",
+          provider: "fixture-judge",
+          model: "independent-judge-v1",
+          generation_parameters: { temperature: 0 },
+          low_confidence_threshold: 0.7,
+        },
+        error: null,
+        created_at: "2026-07-15T00:00:01Z",
+      },
+      human_review_item: {
+        id: "review-01",
+        status: "pending",
+        reasons: ["automatic_conflict"],
+        created_at: "2026-07-15T00:00:01Z",
+        resolved_at: null,
+      },
     },
   ],
 };
+
+const pendingReviewItems = [
+  {
+    id: "review-01",
+    test_case_execution_id: "02-execution",
+    test_case_title: "Surface a new release-blocking regression",
+    application_version_name: candidateVersion.name,
+    evaluation_run_id: scoredEvaluationRun.id,
+    version_role: "candidate",
+    status: "pending",
+    reasons: ["automatic_conflict"],
+    created_at: "2026-07-15T00:00:01Z",
+    resolved_at: null,
+  },
+];
+
+const singleExecutionReviewItems = [
+  {
+    id: "single-review",
+    test_case_execution_id: pendingExecution.id,
+    test_case_title: pendingExecution.test_case_title,
+    application_version_name: createdVersion.name,
+    evaluation_run_id: null,
+    version_role: null,
+    status: "pending",
+    reasons: ["judge_failure"],
+    created_at: "2026-07-15T00:00:00Z",
+    resolved_at: null,
+  },
+];
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -444,7 +555,7 @@ describe("Application Versions", () => {
       .mockResolvedValueOnce(jsonResponse([sampleSuiteSummary]))
       .mockResolvedValueOnce(jsonResponse(sampleSuiteDetail))
       .mockResolvedValueOnce(jsonResponse(pendingExecution, 201))
-      .mockResolvedValueOnce(jsonResponse(completedExecution));
+      .mockResolvedValueOnce(jsonResponse(judgedFailureExecution));
 
     render(<App />);
     expect(await screen.findByText(createdVersion.name)).toBeInTheDocument();
@@ -460,6 +571,10 @@ describe("Application Versions", () => {
 
     expect(await screen.findByText("Completed")).toBeInTheDocument();
     expect(screen.getByText(completedExecution.model_response)).toBeInTheDocument();
+    expect(screen.getByText("Deterministic pass")).toBeInTheDocument();
+    expect(screen.getByText("Semantic judge failed")).toBeInTheDocument();
+    expect(screen.getByText("Cannot reach the configured local semantic judge.")).toBeInTheDocument();
+    expect(screen.getByText("Pending human review")).toBeInTheDocument();
     expect(screen.getByText("125 ms")).toBeInTheDocument();
     expect(screen.getByText("53 total tokens")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenNthCalledWith(4, "/api/test-case-executions", {
@@ -552,8 +667,10 @@ describe("Application Versions", () => {
       .mockResolvedValueOnce(jsonResponse([createdVersion, candidateVersion]))
       .mockResolvedValueOnce(jsonResponse([sampleSuiteSummary]))
       .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse([]))
       .mockResolvedValueOnce(jsonResponse(pendingEvaluationRun, 201))
-      .mockResolvedValueOnce(jsonResponse(completedEvaluationRun));
+      .mockResolvedValueOnce(jsonResponse(completedEvaluationRun))
+      .mockResolvedValueOnce(jsonResponse([]));
 
     render(<App />);
     expect(await screen.findByText(createdVersion.name)).toBeInTheDocument();
@@ -570,7 +687,7 @@ describe("Application Versions", () => {
     expect(screen.getByText("1", { selector: ".progress-card__value" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: createdVersion.name })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: candidateVersion.name })).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenNthCalledWith(4, "/api/evaluation-runs", {
+    expect(fetchMock).toHaveBeenNthCalledWith(5, "/api/evaluation-runs", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -587,7 +704,8 @@ describe("Application Versions", () => {
       .mockReset()
       .mockResolvedValueOnce(jsonResponse([createdVersion, candidateVersion]))
       .mockResolvedValueOnce(jsonResponse([sampleSuiteSummary]))
-      .mockResolvedValueOnce(jsonResponse([completedEvaluationRun]));
+      .mockResolvedValueOnce(jsonResponse([completedEvaluationRun]))
+      .mockResolvedValueOnce(jsonResponse([]));
 
     render(<App />);
     expect(await screen.findByText(createdVersion.name)).toBeInTheDocument();
@@ -598,7 +716,7 @@ describe("Application Versions", () => {
     expect(screen.getByText("provider_unavailable")).toBeInTheDocument();
     expect(screen.getByLabelText("Baseline")).toHaveValue(createdVersion.id);
     expect(screen.getByLabelText("Candidate")).toHaveValue(candidateVersion.id);
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
   });
 
   it("continues polling a running comparison restored from persistence", async () => {
@@ -608,7 +726,9 @@ describe("Application Versions", () => {
       .mockResolvedValueOnce(jsonResponse([createdVersion, candidateVersion]))
       .mockResolvedValueOnce(jsonResponse([sampleSuiteSummary]))
       .mockResolvedValueOnce(jsonResponse([runningEvaluationRun]))
-      .mockResolvedValueOnce(jsonResponse(completedEvaluationRun));
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse(completedEvaluationRun))
+      .mockResolvedValueOnce(jsonResponse([]));
 
     render(<App />);
     expect(await screen.findByText(createdVersion.name)).toBeInTheDocument();
@@ -618,7 +738,7 @@ describe("Application Versions", () => {
     expect(document.querySelector(".progress-card--running .progress-card__value"))
       .toHaveTextContent("1");
     expect(await screen.findByText("Baseline answer from evidence.")).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenNthCalledWith(4, `/api/evaluation-runs/${runningEvaluationRun.id}`);
+    expect(fetchMock).toHaveBeenNthCalledWith(5, `/api/evaluation-runs/${runningEvaluationRun.id}`);
   });
 
   it("opens a new regression and shows exact deterministic rule evidence", async () => {
@@ -627,7 +747,8 @@ describe("Application Versions", () => {
       .mockReset()
       .mockResolvedValueOnce(jsonResponse([createdVersion, candidateVersion]))
       .mockResolvedValueOnce(jsonResponse([sampleSuiteSummary]))
-      .mockResolvedValueOnce(jsonResponse([scoredEvaluationRun]));
+      .mockResolvedValueOnce(jsonResponse([scoredEvaluationRun]))
+      .mockResolvedValueOnce(jsonResponse(pendingReviewItems));
 
     render(<App />);
     expect(await screen.findByText(createdVersion.name)).toBeInTheDocument();
@@ -648,5 +769,54 @@ describe("Application Versions", () => {
     expect(within(candidateEvidence).getByText("Release blocking: 1")).toBeInTheDocument();
     const scoreSummary = screen.getByRole("region", { name: "Deterministic score summary" });
     expect(within(scoreSummary).getByText("Release-blocking regressions: 1")).toBeInTheDocument();
+  });
+
+  it("separates semantic judgment from deterministic evidence and exposes the review queue", async () => {
+    const user = userEvent.setup();
+    fetchMock
+      .mockReset()
+      .mockResolvedValueOnce(jsonResponse([createdVersion, candidateVersion]))
+      .mockResolvedValueOnce(jsonResponse([sampleSuiteSummary]))
+      .mockResolvedValueOnce(jsonResponse([scoredEvaluationRun]))
+      .mockResolvedValueOnce(jsonResponse(pendingReviewItems));
+
+    render(<App />);
+    expect(await screen.findByText(createdVersion.name)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Evaluation Runs" }));
+
+    const reviewQueue = await screen.findByRole("region", { name: "Human Review queue" });
+    expect(within(reviewQueue).getByText("1 unresolved")).toBeInTheDocument();
+    expect(within(reviewQueue).getByText("Automatic score conflict")).toBeInTheDocument();
+
+    const candidateEvidence = screen.getByRole("region", { name: "candidate evidence" });
+    expect(within(candidateEvidence).getByText("Deterministic failure")).toBeInTheDocument();
+    expect(within(candidateEvidence).getByText("Semantic pass")).toBeInTheDocument();
+    expect(within(candidateEvidence).getByText("86% confidence")).toBeInTheDocument();
+    expect(
+      within(candidateEvidence).getByText(
+        "The main answer remains useful despite the literal-rule mismatch.",
+      ),
+    ).toBeInTheDocument();
+    expect(within(candidateEvidence).getByText("Pending human review")).toBeInTheDocument();
+    expect(within(candidateEvidence).getByText("fixture-judge / independent-judge-v1")).toBeInTheDocument();
+  });
+
+  it("keeps single-execution reviews visible even when there is no Evaluation Run", async () => {
+    const user = userEvent.setup();
+    fetchMock
+      .mockReset()
+      .mockResolvedValueOnce(jsonResponse([createdVersion, candidateVersion]))
+      .mockResolvedValueOnce(jsonResponse([sampleSuiteSummary]))
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse(singleExecutionReviewItems));
+
+    render(<App />);
+    expect(await screen.findByText(createdVersion.name)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Evaluation Runs" }));
+
+    const reviewQueue = await screen.findByRole("region", { name: "Human Review queue" });
+    expect(within(reviewQueue).getByText("Semantic judge failure")).toBeInTheDocument();
+    expect(within(reviewQueue).getByText("single execution")).toBeInTheDocument();
+    expect(screen.getByText("No persisted Evaluation Runs yet.")).toBeInTheDocument();
   });
 });

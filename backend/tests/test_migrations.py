@@ -15,6 +15,8 @@ load_dotenv(PROJECT_ROOT / ".env")
 def reset_schema(engine) -> None:
     with engine.begin() as connection:
         for table in (
+            "human_review_items",
+            "semantic_evaluations",
             "deterministic_check_outcomes",
             "deterministic_evaluations",
             "test_case_executions",
@@ -231,6 +233,63 @@ def test_migration_creates_versioned_deterministic_rule_evidence():
     table_names = inspect(engine).get_table_names()
     assert "deterministic_evaluations" not in table_names
     assert "deterministic_check_outcomes" not in table_names
+
+
+def test_migration_creates_semantic_judgments_and_human_review_queue_items():
+    database_url = os.environ["TEST_DATABASE_URL"]
+    config = Config(BACKEND_ROOT / "alembic.ini")
+    config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
+    engine = create_engine(database_url)
+    reset_schema(engine)
+
+    command.upgrade(config, "head")
+
+    inspector = inspect(engine)
+    assert {"semantic_evaluations", "human_review_items"} <= set(
+        inspector.get_table_names()
+    )
+    assert {
+        column["name"] for column in inspector.get_columns("semantic_evaluations")
+    } == {
+        "id",
+        "test_case_execution_id",
+        "judge_version",
+        "outcome",
+        "rationale",
+        "confidence",
+        "judge_configuration",
+        "error",
+        "created_at",
+    }
+    assert {
+        column["name"] for column in inspector.get_columns("human_review_items")
+    } == {
+        "id",
+        "test_case_execution_id",
+        "status",
+        "reasons",
+        "created_at",
+        "resolved_at",
+    }
+    assert inspector.get_foreign_keys("semantic_evaluations")[0][
+        "referred_table"
+    ] == "test_case_executions"
+    assert inspector.get_foreign_keys("human_review_items")[0][
+        "referred_table"
+    ] == "test_case_executions"
+    assert {
+        constraint["name"]
+        for constraint in inspector.get_unique_constraints("semantic_evaluations")
+    } >= {"uq_semantic_evaluation_execution"}
+    assert {
+        constraint["name"]
+        for constraint in inspector.get_unique_constraints("human_review_items")
+    } >= {"uq_human_review_item_execution"}
+
+    command.downgrade(config, "base")
+    table_names = inspect(engine).get_table_names()
+    assert "semantic_evaluations" not in table_names
+    assert "human_review_items" not in table_names
 
 
 def test_migration_backfills_existing_responses_and_regression_classification():

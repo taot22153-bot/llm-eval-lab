@@ -2,7 +2,9 @@ import { useEffect, useState } from "react";
 import { AlertTriangle, CheckCircle2, Play, RefreshCw } from "lucide-react";
 
 import { ApplicationVersion } from "./applicationVersions";
+import ExecutionAssessment, { reviewReasonLabel } from "./ExecutionAssessment";
 import { EvaluationSuiteSummary, listEvaluationSuites } from "./evaluationSuites";
+import { HumanReviewQueueItem, listHumanReviewItems } from "./humanReviewItems";
 import {
   EvaluationRun,
   EvaluationRunExecution,
@@ -36,12 +38,6 @@ function severityLabel(severity: EvaluationRunExecution["test_case_severity"]): 
 }
 
 function ExecutionEvidence({ execution }: { execution: EvaluationRunExecution }) {
-  const deterministicEvaluation = execution.deterministic_evaluation ?? null;
-  const regressionLabel = deterministicEvaluation?.regression_classification === "new_regression"
-    ? "New regression"
-    : deterministicEvaluation?.regression_classification === "existing_failure"
-      ? "Existing failure"
-      : null;
   return (
     <article className={`comparison-evidence comparison-evidence--${execution.status}`}>
       <div className="comparison-evidence__heading">
@@ -52,44 +48,7 @@ function ExecutionEvidence({ execution }: { execution: EvaluationRunExecution })
         Severity: {severityLabel(execution.test_case_severity)}
       </p>
       {execution.model_response ? <p>{execution.model_response}</p> : null}
-      {deterministicEvaluation ? (
-        <div className="deterministic-evaluation">
-          <div className="deterministic-evaluation__status">
-            <span className={deterministicEvaluation.passed ? "rule-pass" : "rule-fail"}>
-              {deterministicEvaluation.passed ? "Deterministic pass" : "Deterministic failure"}
-            </span>
-            {regressionLabel ? <strong>{regressionLabel}</strong> : null}
-          </div>
-          {!deterministicEvaluation.passed || regressionLabel ? (
-            <details className="rule-evidence">
-              <summary>Inspect rule evidence</summary>
-              <p className="rule-evidence__version">
-                Scorer {deterministicEvaluation.scorer_version}
-              </p>
-              <ol>
-                {deterministicEvaluation.outcomes.map((outcome) => (
-                  <li key={`${outcome.check_type}-${outcome.position}`}>
-                    <div>
-                      <strong>
-                        {outcome.check_type === "must_have_fact" ? "Must-have fact" : "Forbidden claim"}
-                      </strong>
-                      <span className={outcome.passed ? "rule-pass" : "rule-fail"}>
-                        {outcome.passed ? "Pass" : "Fail"}
-                      </span>
-                    </div>
-                    <p>{outcome.rule}</p>
-                    <small>
-                      {outcome.matched_evidence
-                        ? `Matched response: ${outcome.matched_evidence}`
-                        : "No matching evidence found."}
-                    </small>
-                  </li>
-                ))}
-              </ol>
-            </details>
-          ) : null}
-        </div>
-      ) : null}
+      <ExecutionAssessment execution={execution} />
       {execution.error ? (
         <div className="comparison-error">
           <strong>{execution.error.code}</strong>
@@ -100,6 +59,33 @@ function ExecutionEvidence({ execution }: { execution: EvaluationRunExecution })
         <p className="comparison-evidence__waiting">Waiting for persisted evidence.</p>
       ) : null}
     </article>
+  );
+}
+
+function HumanReviewQueue({ items }: { items: HumanReviewQueueItem[] }) {
+  if (items.length === 0) return null;
+  return (
+    <section className="human-review-queue" aria-label="Human Review queue">
+      <div className="human-review-queue__heading">
+        <div>
+          <p className="eyebrow">Automatic evidence needs a person</p>
+          <h3>Human Review queue</h3>
+        </div>
+        <strong>{items.length} unresolved</strong>
+      </div>
+      <ul>
+        {items.map((item) => (
+          <li key={item.id}>
+            <div>
+              <strong>{item.test_case_title}</strong>
+              <span>{item.version_role ?? "single execution"}</span>
+            </div>
+            <p>{item.application_version_name}</p>
+            <p>{item.reasons.map(reviewReasonLabel).join(" | ")}</p>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
@@ -153,7 +139,13 @@ function VersionEvidence({ run, role }: { run: EvaluationRun; role: VersionRole 
   );
 }
 
-function EvaluationRunResult({ run }: { run: EvaluationRun }) {
+function EvaluationRunResult({
+  run,
+  reviewItems,
+}: {
+  run: EvaluationRun;
+  reviewItems: HumanReviewQueueItem[];
+}) {
   const progress = [
     ["Total", run.progress.total],
     ["Queued", run.progress.queued],
@@ -216,6 +208,7 @@ export default function EvaluationRunsWorkspace({ versions }: { versions: Applic
   const [candidateId, setCandidateId] = useState(versions[1]?.id ?? "");
   const [suiteId, setSuiteId] = useState("");
   const [evaluationRun, setEvaluationRun] = useState<EvaluationRun | null>(null);
+  const [reviewItems, setReviewItems] = useState<HumanReviewQueueItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -232,12 +225,13 @@ export default function EvaluationRunsWorkspace({ versions }: { versions: Applic
 
   useEffect(() => {
     let active = true;
-    Promise.all([listEvaluationSuites(), listEvaluationRuns()])
-      .then(([loadedSuites, loadedRuns]) => {
+    Promise.all([listEvaluationSuites(), listEvaluationRuns(), listHumanReviewItems()])
+      .then(([loadedSuites, loadedRuns, loadedReviewItems]) => {
         if (!active) return;
         setSuites(loadedSuites);
         const latestRun = loadedRuns[0] ?? null;
         setEvaluationRun(latestRun);
+        setReviewItems(loadedReviewItems);
         setBaselineId(latestRun?.baseline_version.id ?? "");
         setCandidateId(latestRun?.candidate_version.id ?? "");
         setSuiteId(latestRun?.evaluation_suite.id ?? loadedSuites[0]?.id ?? "");
@@ -265,6 +259,10 @@ export default function EvaluationRunsWorkspace({ versions }: { versions: Applic
         const current = await getEvaluationRun(evaluationRun.id);
         if (active) {
           setEvaluationRun(current);
+          if (current.status === "completed" || current.status === "failed") {
+            const currentReviewItems = await listHumanReviewItems();
+            if (active) setReviewItems(currentReviewItems);
+          }
           setError(null);
         }
       } catch (reason) {
@@ -335,7 +333,10 @@ export default function EvaluationRunsWorkspace({ versions }: { versions: Applic
       </section>
       {invalidSelection ? <div className="error-banner" role="alert">Choose two different Application Versions.</div> : null}
       {versions.length < 2 ? <p className="empty-state">Create two Application Versions before comparing them.</p> : null}
-      {evaluationRun ? <EvaluationRunResult run={evaluationRun} /> : null}
+      <HumanReviewQueue items={reviewItems} />
+      {evaluationRun ? (
+        <EvaluationRunResult run={evaluationRun} reviewItems={reviewItems} />
+      ) : null}
       {!evaluationRun && versions.length >= 2 ? <p className="empty-state">No persisted Evaluation Runs yet.</p> : null}
     </>
   );

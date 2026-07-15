@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { AlertTriangle, CheckCircle2, Clock3, Play, RefreshCw } from "lucide-react";
 
 import { ApplicationVersion } from "./applicationVersions";
+import ExecutionAssessment from "./ExecutionAssessment";
 import {
   EvaluationSuiteDetail,
   EvaluationSuiteSummary,
@@ -59,6 +60,8 @@ function ExecutionResult({ execution }: { execution: TestCaseExecution }) {
           {execution.error.message}
         </div>
       ) : null}
+
+      <ExecutionAssessment execution={execution} />
 
       <dl className="execution-metrics">
         <div>

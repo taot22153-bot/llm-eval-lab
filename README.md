@@ -4,7 +4,7 @@ Local-first quality and safety evaluation for LLM applications.
 
 > Status: active development. Application Versions, a versioned sample Evaluation Suite,
 > provider-neutral Test Case execution, persisted Baseline/Candidate Evaluation Runs, and
-> explainable deterministic regression scoring are implemented.
+> layered deterministic/semantic evidence with Human Review routing are implemented.
 
 ## Why this project
 
@@ -29,6 +29,11 @@ LLM Eval Lab is planned as a local Web console that compares a candidate applica
 - Separate model execution failures from deterministic failures, classify Candidate failures as new
   regressions or existing Baseline failures, and summarize correctness, safety, failure severity,
   and new-regression severity by version.
+- Judge every successful response through a separately configured, provider-neutral local semantic
+  judge and persist its structured outcome, rationale, confidence, configuration, or failure state.
+- Keep deterministic evidence and semantic judgment visibly separate, and create a pending Human
+  Review queue item for score conflicts, low confidence, insufficient evidence, judge failures, or
+  Test Cases that explicitly require review.
 - Use local Ollama in the application while automated tests substitute a deterministic adapter behind
   the same provider-neutral boundary.
 - Verify the workflow with backend integration tests and frontend interaction tests.
@@ -95,6 +100,10 @@ ollama list
 ```
 
 Set `OLLAMA_BASE_URL` in the ignored `.env` only when the local service uses a non-default address.
+Set `SEMANTIC_JUDGE_MODEL` to the exact name of a separately chosen installed local model. Setup uses
+an explicit placeholder and never downloads a model. If the judge is missing or unavailable, the
+model execution remains inspectable and the judge failure becomes a pending Human Review item; it
+never becomes a passing semantic score.
 In the Web console:
 
 1. Create an Application Version with provider `ollama` and an exact model name from `ollama list`.
@@ -114,9 +123,9 @@ Automated verification does not require Ollama or a model download.
 2. Choose **Evaluation Runs**, select both versions and **Northstar Electronics Support v1**, then
    choose **Run comparison**.
 3. Confirm the five progress counters remain visible and each Test Case appears once in each version
-   column. Inspect the deterministic summary, then open **Inspect rule evidence** on a failed case to
-   see the exact rule and matching response text. Refresh the page, reopen **Evaluation Runs**, and
-   confirm the latest comparison returns.
+   column. Inspect the deterministic summary, open **Inspect rule evidence** on a failed case, then
+   compare the separate semantic rationale and confidence. Any conflict or judge problem appears in
+   the **Human Review queue**. Refresh the page and confirm the latest comparison returns.
 
 An Evaluation Run reaches **completed** after every queued execution reaches a terminal state. Its
 individual executions may still be **failed**; those provider errors remain visible evidence instead
@@ -124,8 +133,9 @@ of stopping or hiding the other results.
 
 The `exact-phrase-v1` scorer performs case-insensitive phrase checks. Correctness counts must-have
 facts; safety counts forbidden claims. It is deliberately transparent and reproducible, but it does
-not treat paraphrases as matches. Semantic judging is a separate future layer so deterministic
-evidence never becomes indistinguishable from model-based judgment.
+not treat paraphrases as matches. The versioned `structured-semantic-v1` judge handles meaning behind
+the same provider-neutral model boundary while retaining a configuration snapshot. Its answer never
+overwrites deterministic evidence or silently decides a release.
 
 When an existing database upgrades from migration 0004, migration 0005 scores every previously
 completed stored response and restores Baseline/Candidate regression classifications, so historical
@@ -135,8 +145,8 @@ runs do not silently appear unscored.
 
 1. Define immutable baseline and candidate application versions.
 2. Run the same versioned evaluation suite against both versions.
-3. Add local model-based semantic scoring alongside the existing deterministic checks.
-4. Route conflicting or low-confidence results to human review.
+3. Inspect local semantic judgment alongside deterministic evidence.
+4. Resolve conflicting, low-confidence, insufficient, or failed judgments in Human Review.
 5. Compare quality, safety, latency, and cost.
 6. Produce a `pass`, `fail`, or `manual review required` release decision.
 
