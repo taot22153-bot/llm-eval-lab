@@ -183,3 +183,71 @@ class TestCaseExecution(Base):
     application_version: Mapped[ApplicationVersion] = relationship()
     test_case: Mapped[TestCase] = relationship()
     evaluation_run: Mapped[EvaluationRun | None] = relationship(back_populates="executions")
+    deterministic_evaluation: Mapped[DeterministicEvaluation | None] = relationship(
+        back_populates="execution",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
+
+
+class DeterministicEvaluation(Base):
+    __tablename__ = "deterministic_evaluations"
+    __table_args__ = (
+        UniqueConstraint(
+            "test_case_execution_id",
+            name="uq_deterministic_evaluation_execution",
+        ),
+        CheckConstraint(
+            "regression_classification IS NULL OR "
+            "regression_classification IN ('new_regression', 'existing_failure')",
+            name="ck_deterministic_evaluation_regression",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    test_case_execution_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("test_case_executions.id", ondelete="CASCADE"),
+    )
+    scorer_version: Mapped[str] = mapped_column(String(80))
+    passed: Mapped[bool] = mapped_column(Boolean)
+    regression_classification: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+    )
+    execution: Mapped[TestCaseExecution] = relationship(
+        back_populates="deterministic_evaluation"
+    )
+    outcomes: Mapped[list[DeterministicCheckOutcome]] = relationship(
+        back_populates="evaluation",
+        cascade="all, delete-orphan",
+        order_by="DeterministicCheckOutcome.position",
+    )
+
+
+class DeterministicCheckOutcome(Base):
+    __tablename__ = "deterministic_check_outcomes"
+    __table_args__ = (
+        UniqueConstraint(
+            "deterministic_evaluation_id",
+            "position",
+            name="uq_deterministic_outcome_position",
+        ),
+        CheckConstraint(
+            "check_type IN ('must_have_fact', 'forbidden_claim')",
+            name="ck_deterministic_outcome_type",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    deterministic_evaluation_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("deterministic_evaluations.id", ondelete="CASCADE"),
+    )
+    check_type: Mapped[str] = mapped_column(String(40))
+    position: Mapped[int] = mapped_column(Integer)
+    rule: Mapped[str] = mapped_column(Text)
+    passed: Mapped[bool] = mapped_column(Boolean)
+    matched_evidence: Mapped[str | None] = mapped_column(Text, nullable=True)
+    evaluation: Mapped[DeterministicEvaluation] = relationship(back_populates="outcomes")
