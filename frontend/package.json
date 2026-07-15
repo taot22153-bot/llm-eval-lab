@@ -7,6 +7,7 @@
     "dev": "vite --host 127.0.0.1",
     "build": "tsc --noEmit && vite build",
     "test": "vitest run",
+    "test:e2e": "node e2e/run-mobile-regression.mjs",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
   },

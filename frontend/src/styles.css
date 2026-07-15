@@ -1197,6 +1197,7 @@ pre {
 
   .primary-navigation button {
     flex: 1;
+    min-width: 0;
     justify-content: center;
     padding: 0 5px;
     font-size: 11px;
@@ -1230,8 +1231,7 @@ pre {
   }
 
   .comparison-progress {
-    grid-template-columns: repeat(5, minmax(56px, 1fr));
-    overflow-x: auto;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .regression-summary {

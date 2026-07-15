@@ -52,5 +52,7 @@ jobs:
         run: npm --prefix frontend ci
       - name: Test frontend
         run: npm --prefix frontend test
+      - name: Test mobile browser regression
+        run: npm --prefix frontend run test:e2e
       - name: Build frontend
         run: npm --prefix frontend run build

@@ -59,6 +59,21 @@ installs dependencies, and applies migrations. The Web console runs at
 
 No database credentials, API keys, model files, or runtime data are committed.
 
+Run the local verification gates with:
+
+```powershell
+.\.venv\Scripts\python.exe -m ruff check backend
+.\.venv\Scripts\python.exe -m pytest backend\tests -q
+npm --prefix frontend test
+npm --prefix frontend run test:e2e
+npm --prefix frontend run build
+```
+
+The browser regression command starts an isolated Vite server, provides deterministic API fixtures,
+and checks the Evaluation Runs layout at 390×844 and 1440×1000. It uses installed Microsoft Edge on
+Windows; set `PLAYWRIGHT_BROWSER=chrome` to exercise the same Chrome channel used in CI. The command
+pins the Playwright CLI version and does not install or download a browser.
+
 The setup and start scripts both run the idempotent sample seed. To verify it directly,
 run the command twice; both runs should report the same eight-case suite:
 
