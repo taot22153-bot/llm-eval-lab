@@ -227,6 +227,11 @@ select {
   min-height: 40px;
 }
 
+.execution-form select {
+  width: 100%;
+  min-width: 0;
+}
+
 .execution-workspace {
   display: grid;
   grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);

@@ -57,6 +57,7 @@ def get_model_provider_registry() -> ModelProviderRegistry:
     import httpx2
 
     from llm_eval_lab.config import get_settings
+    from llm_eval_lab.demo_provider import DEMO_PROVIDER_NAME, DeterministicDemoAdapter
     from llm_eval_lab.ollama_provider import OllamaModelAdapter
 
     settings = get_settings()
@@ -65,4 +66,9 @@ def get_model_provider_registry() -> ModelProviderRegistry:
         timeout=settings.ollama_timeout_seconds,
         trust_env=False,
     )
-    return ModelProviderRegistry({"ollama": OllamaModelAdapter(ollama_client)})
+    return ModelProviderRegistry(
+        {
+            "ollama": OllamaModelAdapter(ollama_client),
+            DEMO_PROVIDER_NAME: DeterministicDemoAdapter(),
+        }
+    )
