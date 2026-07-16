@@ -197,6 +197,22 @@ runs do not silently appear unscored.
 5. Compare quality, safety, latency, and cost.
 6. Produce a `pass`, `fail`, or `manual review required` release decision.
 
+## Shanghai Jiao Tong University course workflow
+
+Course prompt, model, parameter, RAG, and tool-policy experiments use the same production-shaped
+domain instead of a separate classroom-only module. The learning workflow treats each complete
+configuration as an immutable Application Version, holds all but one primary variable constant,
+runs the same versioned Suite against Baseline and Candidate, and turns Deterministic Evaluation,
+Semantic Evaluation, Human Review, and Release Decision evidence into a reproducible experiment
+report.
+
+For an interview, narrate the same chain in order: hypothesis and controlled variable, paired
+evidence, the reviewer action, and the final release conclusion. The
+[five-minute Windows script](docs/FIVE-MINUTE-DEMO.md) supplies the live demonstration path.
+
+- [Chinese course experiment workflow](docs/SJTU-COURSE-WORKFLOW.md)
+- [Reusable experiment record template](docs/templates/SJTU-EXPERIMENT-RECORD.md)
+
 ## Demo scenario
 
 The full built-in sample Suite evaluates a fictional electronics-store support assistant. Its
@@ -251,6 +267,7 @@ The first milestone is a repeatable five-minute local demo:
 - [Project brief](docs/PROJECT-BRIEF.md)
 - [Domain language](CONTEXT.md)
 - [Five-minute Windows demo](docs/FIVE-MINUTE-DEMO.md)
+- [Shanghai Jiao Tong course workflow](docs/SJTU-COURSE-WORKFLOW.md)
 - [Development workflow](docs/DEVELOPMENT-WORKFLOW.md)
 - [Architecture decisions](docs/adr/)
 
