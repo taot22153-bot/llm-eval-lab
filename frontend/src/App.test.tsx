@@ -846,6 +846,10 @@ describe("Application Versions", () => {
 
   it("runs a Baseline and Candidate comparison with stable progress and paired evidence", async () => {
     const user = userEvent.setup();
+    let resolveReviewItems: ((response: Response) => void) | undefined;
+    const delayedReviewItems = new Promise<Response>((resolve) => {
+      resolveReviewItems = resolve;
+    });
     fetchMock
       .mockReset()
       .mockResolvedValueOnce(jsonResponse([createdVersion, candidateVersion]))
@@ -854,7 +858,7 @@ describe("Application Versions", () => {
       .mockResolvedValueOnce(jsonResponse([]))
       .mockResolvedValueOnce(jsonResponse(pendingEvaluationRun, 201))
       .mockResolvedValueOnce(jsonResponse(completedEvaluationRun))
-      .mockResolvedValueOnce(jsonResponse([]));
+      .mockReturnValueOnce(delayedReviewItems);
 
     render(<App />);
     expect(await screen.findByText(createdVersion.name)).toBeInTheDocument();
@@ -865,12 +869,19 @@ describe("Application Versions", () => {
     expect(screen.getByLabelText("Candidate")).toHaveValue(candidateVersion.id);
     await user.click(screen.getByRole("button", { name: "Run comparison" }));
 
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(7));
+    resolveReviewItems?.(jsonResponse(pendingReviewItems));
     expect(await screen.findByText("Baseline answer from evidence.")).toBeInTheDocument();
     expect(screen.getByText("provider_unavailable")).toBeInTheDocument();
     expect(screen.getByText("3", { selector: ".progress-card__value" })).toBeInTheDocument();
     expect(screen.getByText("1", { selector: ".progress-card__value" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: createdVersion.name })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: candidateVersion.name })).toBeInTheDocument();
+    expect(
+      within(screen.getByRole("region", { name: "Human Review queue" })).getByText(
+        "1 unresolved",
+      ),
+    ).toBeInTheDocument();
     expect(fetchMock).toHaveBeenNthCalledWith(5, "/api/evaluation-runs", {
       method: "POST",
       headers: { "Content-Type": "application/json" },

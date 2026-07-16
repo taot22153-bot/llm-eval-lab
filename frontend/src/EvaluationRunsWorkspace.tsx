@@ -462,14 +462,20 @@ export default function EvaluationRunsWorkspace({ versions }: { versions: Applic
       if (!active || evaluationRun === null) return;
       try {
         const current = await getEvaluationRun(evaluationRun.id);
-        if (active) {
-          showEvaluationRun(current);
-          if (current.status === "completed" || current.status === "failed") {
-            const currentReviewItems = await listHumanReviewItems();
-            if (active) setReviewItems(currentReviewItems);
+        let currentReviewItems: HumanReviewQueueItem[] | null = null;
+        let reviewRefreshError: string | null = null;
+        if (current.status === "completed" || current.status === "failed") {
+          try {
+            currentReviewItems = await listHumanReviewItems();
+          } catch (reason) {
+            reviewRefreshError =
+              reason instanceof Error ? reason.message : "Unable to refresh Human Reviews.";
           }
-          setError(null);
         }
+        if (!active) return;
+        showEvaluationRun(current);
+        if (currentReviewItems) setReviewItems(currentReviewItems);
+        setError(reviewRefreshError);
       } catch (reason) {
         if (active) {
           setError(reason instanceof Error ? reason.message : "Unable to refresh the comparison.");

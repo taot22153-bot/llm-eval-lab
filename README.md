@@ -11,7 +11,7 @@ Local-first quality and safety evaluation for LLM applications.
 
 Changing a model, system prompt, generation parameter, knowledge source, or tool can improve one behavior while silently breaking another. A single aggregate score is not enough to decide whether an LLM application is safe to release.
 
-LLM Eval Lab is planned as a local Web console that compares a candidate application version with a known baseline, surfaces regressions, and produces an explainable release decision.
+LLM Eval Lab is a local Web console that compares a candidate application version with a known baseline, surfaces regressions, and produces an explainable release decision.
 
 ## Implemented now
 
@@ -103,6 +103,31 @@ Rule:
 Open the Web console, choose **Evaluation Suites**, and browse **Northstar Electronics
 Support v1** to inspect the complete synthetic evidence for each Test Case.
 
+### Run the five-minute deterministic offline demo
+
+After the one-time setup, start a known Baseline/Candidate scenario with one command:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\start-demo.ps1
+```
+
+This command ensures two reserved fixed-ID demo Application Versions and resets only evidence from
+comparisons where that exact demo-version pair is used together,
+then starts MySQL, FastAPI, and the Web console. It does not call Ollama, download a model, use a
+remote API, or alter unrelated Application Versions or evidence. Use `scripts\reset-demo.ps1` for reset-only,
+or add `-KeepEvidence` to `start-demo.ps1` when you intentionally want to retain the previous demo
+run.
+
+In **Evaluation Runs**, select the two clearly named demo versions and **Northstar Interview Demo
+v1**. Run the comparison,
+inspect the one release-blocking Candidate regression, resolve its automatic-score conflict as a
+Human Review failure, and produce the explainable failed Release Decision. The complete timed
+script and recovery notes are in [Five-minute Windows demo](docs/FIVE-MINUTE-DEMO.md).
+
+![Human Review evidence](docs/screenshots/demo-human-review.png)
+
+![Explainable Release Decision](docs/screenshots/demo-release-decision.png)
+
 ### Run one Test Case with an existing Ollama model
 
 LLM Eval Lab does not download a model automatically. If Ollama and a suitable local model are
@@ -174,13 +199,17 @@ runs do not silently appear unscored.
 
 ## Demo scenario
 
-The built-in demo will evaluate a fictional electronics-store support assistant. The synthetic dataset will include:
+The full built-in sample Suite evaluates a fictional electronics-store support assistant. Its
+eight-case synthetic dataset includes:
 
 - product, shipping, return, and warranty policies;
 - normal customer questions;
 - hallucination-inducing questions;
 - prompt-injection and jailbreak attempts;
 - expected facts, forbidden claims, and severity levels.
+
+The five-minute interview path uses **Northstar Interview Demo v1**, a focused one-case slice of
+that dataset with one intentional release-blocking regression and one automatic-score conflict.
 
 The store is only a demonstration fixture. The evaluation platform is not limited to e-commerce.
 
@@ -190,19 +219,20 @@ The store is only a demonstration fixture. The evaluation platform is not limite
 - **Evidence over a single score:** deterministic checks, semantic scoring, and human review remain distinguishable.
 - **Regression focused:** candidate results are always compared with a baseline.
 - **Explainable release gates:** blocking failures, important regressions, review state, latency, and cost all affect the decision.
-- **Provider neutral:** Ollama and OpenAI-compatible endpoints share one model boundary.
+- **Provider neutral:** Ollama and the explicit offline demo fixture share one model boundary.
 - **No hidden cloud dependency:** cloud APIs and rented GPUs are optional enhancements.
 
-## Planned stack
+## Stack and provider scope
 
 - Python 3.12 and FastAPI
 - MySQL
 - React Web console
 - Ollama for local inference
-- OpenAI-compatible API adapter for optional remote inference
 - pytest and GitHub Actions
 
-The stack may evolve through documented architecture decisions as implementation evidence becomes available.
+The local Ollama adapter is implemented. The deterministic `demo-fixture` adapter is deliberately
+labeled as test data rather than a real model. An OpenAI-compatible remote adapter is an optional,
+not-yet-implemented enhancement and is not required by the offline demo.
 
 ## Delivery target
 
@@ -220,6 +250,7 @@ The first milestone is a repeatable five-minute local demo:
 
 - [Project brief](docs/PROJECT-BRIEF.md)
 - [Domain language](CONTEXT.md)
+- [Five-minute Windows demo](docs/FIVE-MINUTE-DEMO.md)
 - [Development workflow](docs/DEVELOPMENT-WORKFLOW.md)
 - [Architecture decisions](docs/adr/)
 

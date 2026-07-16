@@ -197,7 +197,11 @@ try {
   console.log(`Mobile Evaluation Runs browser regression passed in ${browser}.`);
 } finally {
   try {
-    await runPlaywright(["close"], { allowFailure: true, timeoutMs: 20_000 });
+    try {
+      await runPlaywright(["close"], { allowFailure: true, timeoutMs: 20_000 });
+    } catch (error) {
+      console.warn(`Playwright cleanup warning: ${error.message}`);
+    }
   } finally {
     await stopServer(server);
   }
