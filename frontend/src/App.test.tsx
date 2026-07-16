@@ -110,7 +110,7 @@ const completedExecution = {
   ...pendingExecution,
   status: "completed",
   model_response: "The EchoBud X1 is available in black or silver.",
-  usage: { prompt_tokens: 42, completion_tokens: 11, total_tokens: 53 },
+  usage: { prompt_tokens: 42, completion_tokens: 11, total_tokens: 53, cost_usd: 0.0000275 },
   latency_ms: 125,
   started_at: "2026-07-15T00:00:00Z",
   completed_at: "2026-07-15T00:00:00.125Z",
@@ -526,7 +526,7 @@ const defaultReleaseRule = {
   maximum_correctness_drop: 0,
   minimum_candidate_safety_rate: 1,
   maximum_candidate_average_latency_ms: 2000,
-  maximum_candidate_total_cost_usd: null,
+  maximum_candidate_total_cost_usd: 0.00005,
   created_at: "2026-07-15T00:00:00Z",
 };
 
@@ -570,10 +570,10 @@ const failedReleaseDecision = {
       status: "pass",
     },
     cost: {
-      baseline_total_usd: null,
-      candidate_total_usd: null,
-      maximum_candidate_total_usd: null,
-      status: "not_configured",
+      baseline_total_usd: 0,
+      candidate_total_usd: 0.0000275,
+      maximum_candidate_total_usd: 0.00005,
+      status: "pass",
     },
   },
   evidence_fingerprint: "a".repeat(64),
@@ -760,7 +760,8 @@ describe("Application Versions", () => {
     expect(screen.getByText("Cannot reach the configured local semantic judge.")).toBeInTheDocument();
     expect(screen.getByText("Pending human review")).toBeInTheDocument();
     expect(screen.getByText("125 ms")).toBeInTheDocument();
-    expect(screen.getByText("53 total tokens")).toBeInTheDocument();
+    expect(screen.getByText("Prompt 42 · Completion 11 · Total 53")).toBeInTheDocument();
+    expect(screen.getByText("<$0.0001")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenNthCalledWith(4, "/api/test-case-executions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -877,6 +878,21 @@ describe("Application Versions", () => {
     expect(screen.getByText("1", { selector: ".progress-card__value" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: createdVersion.name })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: candidateVersion.name })).toBeInTheDocument();
+    const baselineSummary = screen.getByRole("article", {
+      name: "Baseline score and runtime summary",
+    });
+    expect(within(baselineSummary).getByText("Prompt 42 · Completion 11 · Total 53"))
+      .toBeInTheDocument();
+    expect(within(baselineSummary).getByText("<$0.0001")).toBeInTheDocument();
+    const candidateSummary = screen.getByRole("article", {
+      name: "Candidate score and runtime summary",
+    });
+    expect(within(candidateSummary).getByText("Tokens").closest("div")).toHaveTextContent(
+      "Unknown",
+    );
+    expect(within(candidateSummary).getByText("Cost").closest("div")).toHaveTextContent(
+      "Unknown",
+    );
     expect(
       within(screen.getByRole("region", { name: "Human Review queue" })).getByText(
         "1 unresolved",
@@ -993,7 +1009,7 @@ describe("Application Versions", () => {
     expect(within(panel).getByText("Maximum correctness drop: 0%")).toBeInTheDocument();
     expect(within(panel).getByText("Minimum candidate safety: 100%")).toBeInTheDocument();
     expect(within(panel).getByText("Maximum candidate latency: 2000 ms")).toBeInTheDocument();
-    expect(within(panel).getByText("Maximum candidate cost: Not configured")).toBeInTheDocument();
+    expect(within(panel).getByText("Maximum candidate cost: <$0.0001")).toBeInTheDocument();
     expect(within(panel).getByText("Blocking failures: Release blocking")).toBeInTheDocument();
     expect(
       within(panel).getByText("New regression failures: Important · Release blocking"),
@@ -1010,8 +1026,10 @@ describe("Application Versions", () => {
     ).toBeInTheDocument();
     const correctnessMetric = within(panel).getByText("Correctness").closest("div");
     const safetyMetric = within(panel).getByText("Safety").closest("div");
+    const costMetric = within(panel).getByText("Cost").closest("div");
     expect(correctnessMetric).not.toBeNull();
     expect(safetyMetric).not.toBeNull();
+    expect(costMetric).not.toBeNull();
     expect(within(correctnessMetric as HTMLElement).getByText("Baseline 100%"))
       .toBeInTheDocument();
     expect(within(correctnessMetric as HTMLElement).getByText("Candidate 100%"))
@@ -1021,6 +1039,10 @@ describe("Application Versions", () => {
     expect(within(safetyMetric as HTMLElement).getByText("Baseline 100%"))
       .toBeInTheDocument();
     expect(within(safetyMetric as HTMLElement).getByText("Candidate 0%"))
+      .toBeInTheDocument();
+    expect(within(costMetric as HTMLElement).getByText("Baseline $0.0000"))
+      .toBeInTheDocument();
+    expect(within(costMetric as HTMLElement).getByText("Candidate <$0.0001"))
       .toBeInTheDocument();
     expect(within(panel).getByText("Observed: Release blocking")).toBeInTheDocument();
     expect(within(panel).getByText("Threshold: Release blocking")).toBeInTheDocument();

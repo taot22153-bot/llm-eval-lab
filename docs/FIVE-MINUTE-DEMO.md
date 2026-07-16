@@ -136,8 +136,8 @@ Use an exact installed model name when creating each `ollama` Application Versio
 chosen installed model. A missing service or model is recorded as actionable provider/judge
 failure evidence and must not be described as a successful manual validation.
 
-An OpenAI-compatible remote provider is not implemented in the core demo. It remains an optional
-enhancement and the release path has no cloud dependency.
+The OpenAI-compatible remote provider is implemented as an optional environment-configured
+adapter, but it is disabled and unused in the core demo. The release path has no cloud dependency.
 
 ## Troubleshooting
 

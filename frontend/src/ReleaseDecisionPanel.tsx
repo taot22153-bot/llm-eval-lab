@@ -8,6 +8,7 @@ import {
   listReleaseDecisions,
   listReleaseRules,
 } from "./releaseDecisions";
+import { formatCostUsd } from "./runtimeMetrics";
 
 function percent(value: number): string {
   return `${Math.round(value * 100)}%`;
@@ -45,7 +46,7 @@ function latency(value: number | null): string {
 }
 
 function cost(value: number | null): string {
-  return value === null ? "Unavailable" : `$${value.toFixed(4)}`;
+  return value === null ? "Unavailable" : formatCostUsd(value);
 }
 
 function ReleaseRuleSummary({ rule }: { rule: ReleaseRule }) {
@@ -63,7 +64,7 @@ function ReleaseRuleSummary({ rule }: { rule: ReleaseRule }) {
       <span>
         Maximum candidate cost: {rule.maximum_candidate_total_cost_usd === null
           ? "Not configured"
-          : `$${rule.maximum_candidate_total_cost_usd.toFixed(4)}`}
+          : formatCostUsd(rule.maximum_candidate_total_cost_usd)}
       </span>
       <span>
         Human Review: {rule.require_resolved_reviews ? "Must be resolved" : "Optional"}

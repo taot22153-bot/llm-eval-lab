@@ -59,6 +59,7 @@ def get_model_provider_registry() -> ModelProviderRegistry:
     from llm_eval_lab.config import get_settings
     from llm_eval_lab.demo_provider import DEMO_PROVIDER_NAME, DeterministicDemoAdapter
     from llm_eval_lab.ollama_provider import OllamaModelAdapter
+    from llm_eval_lab.openai_compatible_provider import OpenAICompatibleAdapter
 
     settings = get_settings()
     ollama_client = httpx2.Client(
@@ -66,9 +67,29 @@ def get_model_provider_registry() -> ModelProviderRegistry:
         timeout=settings.ollama_timeout_seconds,
         trust_env=False,
     )
-    return ModelProviderRegistry(
-        {
-            "ollama": OllamaModelAdapter(ollama_client),
-            DEMO_PROVIDER_NAME: DeterministicDemoAdapter(),
-        }
-    )
+    providers: dict[str, ModelProvider] = {
+        "ollama": OllamaModelAdapter(ollama_client),
+        DEMO_PROVIDER_NAME: DeterministicDemoAdapter(),
+    }
+    if settings.openai_compatible_base_url:
+        headers = {}
+        if settings.openai_compatible_api_key is not None:
+            headers["Authorization"] = (
+                f"Bearer {settings.openai_compatible_api_key.get_secret_value()}"
+            )
+        compatible_client = httpx2.Client(
+            base_url=f"{settings.openai_compatible_base_url.rstrip('/')}/",
+            headers=headers,
+            timeout=settings.openai_compatible_timeout_seconds,
+            trust_env=False,
+        )
+        providers["openai-compatible"] = OpenAICompatibleAdapter(
+            compatible_client,
+            input_cost_per_million_tokens=(
+                settings.openai_compatible_input_cost_per_million_tokens
+            ),
+            output_cost_per_million_tokens=(
+                settings.openai_compatible_output_cost_per_million_tokens
+            ),
+        )
+    return ModelProviderRegistry(providers)

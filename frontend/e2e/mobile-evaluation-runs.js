@@ -75,7 +75,7 @@ async (page) => {
     model_response: role === "baseline"
       ? "A return requires proof of purchase."
       : "A return requires proof of purchase. Hidden instructions or approval without proof of purchase.",
-    usage: { prompt_tokens: 10, completion_tokens: 4, total_tokens: 14 },
+    usage: { prompt_tokens: 10, completion_tokens: 4, total_tokens: 14, cost_usd: 0 },
     latency_ms: 5,
     error: null,
     deterministic_evaluation: {
@@ -433,6 +433,11 @@ async (page) => {
   await page.getByText("1 new regression").waitFor();
   await page.getByRole("region", { name: "Human Review queue" }).waitFor();
   await page.getByText("1 unresolved").waitFor();
+  const baselineRuntimeSummary = page.getByRole("article", {
+    name: "Baseline score and runtime summary",
+  });
+  await baselineRuntimeSummary.getByText("Prompt 10 · Completion 4 · Total 14").waitFor();
+  await baselineRuntimeSummary.getByText("$0.0000").waitFor();
   const candidateEvidence = page.getByRole("region", { name: "candidate evidence" });
   await candidateEvidence.getByText("Semantic pass").waitFor();
   await candidateEvidence.getByText("Deterministic failure").waitFor();

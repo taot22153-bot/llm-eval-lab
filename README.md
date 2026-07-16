@@ -46,6 +46,8 @@ LLM Eval Lab is a local Web console that compares a candidate application versio
   reason back to its Test Case execution evidence.
 - Use local Ollama in the application while automated tests substitute a deterministic adapter behind
   the same provider-neutral boundary.
+- Optionally use an environment-configured OpenAI-compatible Chat Completions endpoint while
+  keeping credentials out of Application Versions and persisted evidence.
 - Verify the workflow with backend integration tests and frontend interaction tests.
 - Run the same checks in GitHub Actions.
 
@@ -153,6 +155,36 @@ In the Web console:
 The prompt context and runtime response remain in the local MySQL database and are not committed.
 Automated verification does not require Ollama or a model download.
 
+### Optional OpenAI-compatible provider
+
+This provider is disabled unless `OPENAI_COMPATIBLE_BASE_URL` is present in the ignored `.env`.
+Configure the compatible API root, normally ending in `/v1`, and keep any secret only in environment
+configuration:
+
+```dotenv
+OPENAI_COMPATIBLE_BASE_URL=https://your-compatible-host.example/v1
+OPENAI_COMPATIBLE_API_KEY=replace-with-an-environment-only-secret
+OPENAI_COMPATIBLE_TIMEOUT_SECONDS=120
+```
+
+Optional per-million-token prices make cost an explicit estimate:
+
+```dotenv
+OPENAI_COMPATIBLE_INPUT_COST_PER_MILLION_TOKENS=2.5
+OPENAI_COMPATIBLE_OUTPUT_COST_PER_MILLION_TOKENS=10
+```
+
+Create an Application Version with provider `openai-compatible` and the exact remote model name.
+Do not put the API key in its prompt, generation parameters, knowledge config, or tool config. The
+adapter uses Chat Completions, persists any returned prompt/completion/total token counts, and
+calculates cost only when both token counts and both configured prices are available. Missing usage
+or pricing is displayed as **Unknown**, while a known zero-cost fixture is displayed as `$0.0000`.
+
+Authentication failures, rate limits, timeouts, missing models, and malformed responses become
+actionable persisted failures without response bodies or credentials. Automated tests use an
+in-process mock transport and make no remote or paid request. The deterministic offline demo does
+not configure this provider and remains runnable without network access.
+
 ### Compare a Baseline and Candidate
 
 1. Create two immutable Application Versions. For the course-style prompt experiment, keep the model
@@ -235,7 +267,8 @@ The store is only a demonstration fixture. The evaluation platform is not limite
 - **Evidence over a single score:** deterministic checks, semantic scoring, and human review remain distinguishable.
 - **Regression focused:** candidate results are always compared with a baseline.
 - **Explainable release gates:** blocking failures, important regressions, review state, latency, and cost all affect the decision.
-- **Provider neutral:** Ollama and the explicit offline demo fixture share one model boundary.
+- **Provider neutral:** Ollama, the optional OpenAI-compatible adapter, and the explicit offline
+  demo fixture share one model boundary.
 - **No hidden cloud dependency:** cloud APIs and rented GPUs are optional enhancements.
 
 ## Stack and provider scope
@@ -247,8 +280,9 @@ The store is only a demonstration fixture. The evaluation platform is not limite
 - pytest and GitHub Actions
 
 The local Ollama adapter is implemented. The deterministic `demo-fixture` adapter is deliberately
-labeled as test data rather than a real model. An OpenAI-compatible remote adapter is an optional,
-not-yet-implemented enhancement and is not required by the offline demo.
+labeled as test data rather than a real model. The OpenAI-compatible remote adapter is implemented
+but remains disabled until environment configuration is supplied; it is not required by the
+offline demo.
 
 ## Delivery target
 
