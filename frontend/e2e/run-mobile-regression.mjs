@@ -183,7 +183,7 @@ try {
       "--filename",
       path.join(frontendRoot, "e2e", "mobile-evaluation-runs.js"),
     ],
-    { stdio: "pipe" },
+    { stdio: "pipe", timeoutMs: 120_000 },
   );
   let assertionPayload;
   try {

@@ -414,6 +414,11 @@ select {
   font-weight: 750;
 }
 
+.score-summary-card dd.runtime-token-summary {
+  font-size: 11px;
+  line-height: 1.35;
+}
+
 .severity-summary {
   display: flex;
   flex-wrap: wrap;
@@ -1096,7 +1101,7 @@ select {
 
 .execution-metrics {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
   margin: 18px 0 0;
 }

@@ -14,6 +14,7 @@ import {
   createTestCaseExecution,
   getTestCaseExecution,
 } from "./testCaseExecutions";
+import { formatCostUsd } from "./runtimeMetrics";
 
 const POLL_INTERVAL_MS = 400;
 
@@ -23,6 +24,15 @@ function waitForNextPoll(): Promise<void> {
 
 function statusLabel(status: TestCaseExecution["status"]): string {
   return status.charAt(0).toUpperCase() + status.slice(1);
+}
+
+function tokenUsageLabel(usage: TestCaseExecution["usage"]): string {
+  if (usage === null) return "Unknown";
+  return [
+    `Prompt ${usage.prompt_tokens ?? "Unknown"}`,
+    `Completion ${usage.completion_tokens ?? "Unknown"}`,
+    `Total ${usage.total_tokens ?? "Unknown"}`,
+  ].join(" · ");
 }
 
 function ExecutionResult({ execution }: { execution: TestCaseExecution }) {
@@ -77,11 +87,11 @@ function ExecutionResult({ execution }: { execution: TestCaseExecution }) {
         </div>
         <div>
           <dt>Usage</dt>
-          <dd>
-            {execution.usage?.total_tokens === null || execution.usage === null
-              ? "Unknown"
-              : `${execution.usage.total_tokens} total tokens`}
-          </dd>
+          <dd>{tokenUsageLabel(execution.usage)}</dd>
+        </div>
+        <div>
+          <dt>Cost</dt>
+          <dd>{formatCostUsd(execution.usage?.cost_usd)}</dd>
         </div>
       </dl>
     </section>

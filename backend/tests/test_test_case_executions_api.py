@@ -4,6 +4,7 @@ import os
 from datetime import UTC, datetime
 from pathlib import Path
 
+import httpx2
 import pytest
 from dotenv import load_dotenv
 from fastapi.testclient import TestClient
@@ -25,6 +26,7 @@ from llm_eval_lab.model_provider import (
 from llm_eval_lab.models import ApplicationVersion
 from llm_eval_lab.models import TestCase as EvaluationTestCase
 from llm_eval_lab.models import TestCaseExecution as EvaluationTestCaseExecution
+from llm_eval_lab.openai_compatible_provider import OpenAICompatibleAdapter
 from llm_eval_lab.sample_suite import seed_sample_evaluation_suite
 from llm_eval_lab.semantic_judging import (
     SemanticJudgeRequest,
@@ -280,6 +282,70 @@ def test_provider_failure_is_persisted_without_corrupting_the_execution_record()
         "code": "provider_unavailable",
         "message": "Cannot reach the configured local model provider. Start it and retry.",
     }
+    assert failed["started_at"].endswith("Z")
+    assert failed["completed_at"].endswith("Z")
+
+
+def test_openai_compatible_rate_limit_is_persisted_without_exposing_the_api_key():
+    with SessionLocal() as session:
+        suite = seed_sample_evaluation_suite(session)
+        test_case = session.scalar(
+            select(EvaluationTestCase).where(
+                EvaluationTestCase.suite_id == suite.id,
+                EvaluationTestCase.key == "product-echo-bud-facts",
+            )
+        )
+        application_version = ApplicationVersion(
+            name="Remote-compatible candidate",
+            model_provider="openai-compatible",
+            model_name="compatible-model",
+            system_prompt="Answer only from supplied evidence.",
+            generation_parameters={"temperature": 0},
+            knowledge_config=None,
+            tool_config=None,
+        )
+        session.add(application_version)
+        session.commit()
+        assert test_case is not None
+        application_version_id = application_version.id
+        test_case_id = test_case.id
+
+    secret = "must-not-be-persisted"
+    compatible_client = httpx2.Client(
+        base_url="https://compatible.test/v1/",
+        headers={"Authorization": f"Bearer {secret}"},
+        transport=httpx2.MockTransport(
+            lambda _: httpx2.Response(429, json={"error": {"message": secret}})
+        ),
+    )
+    registry = ModelProviderRegistry(
+        {"openai-compatible": OpenAICompatibleAdapter(compatible_client)}
+    )
+    app.dependency_overrides[get_model_provider_registry] = lambda: registry
+    app.dependency_overrides[get_semantic_judge] = lambda: DeterministicSemanticJudge()
+
+    with TestClient(app) as client:
+        create_response = client.post(
+            "/api/test-case-executions",
+            json={
+                "application_version_id": application_version_id,
+                "test_case_id": test_case_id,
+            },
+        )
+        failed = client.get(
+            f"/api/test-case-executions/{create_response.json()['id']}"
+        ).json()
+
+    assert create_response.status_code == 201
+    assert failed["status"] == "failed"
+    assert failed["error"]["code"] == "provider_rate_limited"
+    assert "OPENAI_COMPATIBLE_BASE_URL" in failed["error"]["message"]
+    assert secret not in str(failed)
+    assert failed["model_response"] is None
+    assert failed["usage"] is None
+    assert failed["deterministic_evaluation"] is None
+    assert failed["semantic_evaluation"] is None
+    assert failed["human_review_item"] is None
     assert failed["started_at"].endswith("Z")
     assert failed["completed_at"].endswith("Z")
 

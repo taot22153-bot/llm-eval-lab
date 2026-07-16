@@ -21,6 +21,7 @@ import {
   getEvaluationRun,
   listEvaluationRuns,
 } from "./evaluationRuns";
+import { formatCostUsd } from "./runtimeMetrics";
 
 const POLL_INTERVAL_MS = 400;
 
@@ -36,6 +37,51 @@ function SeverityFailures({ summary }: { summary: VersionDeterministicSummary })
       <span>Release blocking: {summary.severity_failures.release_blocking}</span>
     </>
   );
+}
+
+interface RuntimeSummary {
+  promptTokens: number | null;
+  completionTokens: number | null;
+  totalTokens: number | null;
+  averageLatencyMs: number | null;
+  totalCostUsd: number | null;
+}
+
+function sumCompleteMetric(
+  executions: EvaluationRunExecution[],
+  value: (execution: EvaluationRunExecution) => number | null | undefined,
+): number | null {
+  if (executions.length === 0) return null;
+  const values = executions.map(value);
+  if (values.some((item) => item == null)) return null;
+  return (values as number[]).reduce((total, item) => total + item, 0);
+}
+
+function summarizeRuntime(executions: EvaluationRunExecution[]): RuntimeSummary {
+  const latencyTotal = sumCompleteMetric(executions, (execution) => execution.latency_ms);
+  return {
+    promptTokens: sumCompleteMetric(
+      executions,
+      (execution) => execution.usage?.prompt_tokens,
+    ),
+    completionTokens: sumCompleteMetric(
+      executions,
+      (execution) => execution.usage?.completion_tokens,
+    ),
+    totalTokens: sumCompleteMetric(executions, (execution) => execution.usage?.total_tokens),
+    averageLatencyMs: latencyTotal === null
+      ? null
+      : Math.round(latencyTotal / executions.length),
+    totalCostUsd: sumCompleteMetric(executions, (execution) => execution.usage?.cost_usd),
+  };
+}
+
+function runtimeTokenLabel(summary: RuntimeSummary): string {
+  return [
+    `Prompt ${summary.promptTokens ?? "Unknown"}`,
+    `Completion ${summary.completionTokens ?? "Unknown"}`,
+    `Total ${summary.totalTokens ?? "Unknown"}`,
+  ].join(" · ");
 }
 
 function severityLabel(severity: EvaluationRunExecution["test_case_severity"]): string {
@@ -286,12 +332,15 @@ function HumanReviewQueue({
 function VersionScoreSummary({
   label,
   summary,
+  executions,
 }: {
   label: string;
   summary: VersionDeterministicSummary;
+  executions: EvaluationRunExecution[];
 }) {
+  const runtime = summarizeRuntime(executions);
   return (
-    <article className="score-summary-card">
+    <article className="score-summary-card" aria-label={`${label} score and runtime summary`}>
       <div className="score-summary-card__heading">
         <strong>{label}</strong>
         <span>{summary.passed_test_cases}/{summary.scored_test_cases} test cases passed</span>
@@ -308,6 +357,18 @@ function VersionScoreSummary({
         <div>
           <dt>Failed test cases</dt>
           <dd>{summary.failed_test_cases}</dd>
+        </div>
+        <div>
+          <dt>Tokens</dt>
+          <dd className="runtime-token-summary">{runtimeTokenLabel(runtime)}</dd>
+        </div>
+        <div>
+          <dt>Average latency</dt>
+          <dd>{runtime.averageLatencyMs === null ? "Unknown" : `${runtime.averageLatencyMs} ms`}</dd>
+        </div>
+        <div>
+          <dt>Cost</dt>
+          <dd>{formatCostUsd(runtime.totalCostUsd)}</dd>
         </div>
       </dl>
       <p className="severity-summary"><SeverityFailures summary={summary} /></p>
@@ -334,6 +395,12 @@ function VersionEvidence({ run, role }: { run: EvaluationRun; role: VersionRole 
 }
 
 function EvaluationRunResult({ run }: { run: EvaluationRun }) {
+  const baselineExecutions = run.executions.filter(
+    (execution) => execution.version_role === "baseline",
+  );
+  const candidateExecutions = run.executions.filter(
+    (execution) => execution.version_role === "candidate",
+  );
   const progress = [
     ["Total", run.progress.total],
     ["Queued", run.progress.queued],
@@ -378,8 +445,16 @@ function EvaluationRunResult({ run }: { run: EvaluationRun }) {
           </div>
         </div>
         <div className="score-summary-grid">
-          <VersionScoreSummary label="Baseline" summary={run.deterministic_summary.baseline} />
-          <VersionScoreSummary label="Candidate" summary={run.deterministic_summary.candidate} />
+          <VersionScoreSummary
+            label="Baseline"
+            summary={run.deterministic_summary.baseline}
+            executions={baselineExecutions}
+          />
+          <VersionScoreSummary
+            label="Candidate"
+            summary={run.deterministic_summary.candidate}
+            executions={candidateExecutions}
+          />
         </div>
       </section>
       {run.status === "completed" ? (

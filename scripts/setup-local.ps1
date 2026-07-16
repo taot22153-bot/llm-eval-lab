@@ -147,14 +147,30 @@ if (-not $semanticJudgeThreshold) {
     $semanticJudgeThreshold = "0.7"
 }
 
-$envContent = @"
-DATABASE_URL=mysql+pymysql://llm_eval_lab:$appPassword@127.0.0.1:3307/llm_eval_lab
-TEST_DATABASE_URL=mysql+pymysql://llm_eval_lab:$appPassword@127.0.0.1:3307/llm_eval_lab_test
-CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
-SEMANTIC_JUDGE_PROVIDER=$semanticJudgeProvider
-SEMANTIC_JUDGE_MODEL=$semanticJudgeModel
-SEMANTIC_JUDGE_LOW_CONFIDENCE_THRESHOLD=$semanticJudgeThreshold
-"@
+$envLines = @(
+    "DATABASE_URL=mysql+pymysql://llm_eval_lab:$appPassword@127.0.0.1:3307/llm_eval_lab",
+    "TEST_DATABASE_URL=mysql+pymysql://llm_eval_lab:$appPassword@127.0.0.1:3307/llm_eval_lab_test",
+    "CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173",
+    "SEMANTIC_JUDGE_PROVIDER=$semanticJudgeProvider",
+    "SEMANTIC_JUDGE_MODEL=$semanticJudgeModel",
+    "SEMANTIC_JUDGE_LOW_CONFIDENCE_THRESHOLD=$semanticJudgeThreshold"
+)
+$preservedProviderKeys = @(
+    "OLLAMA_BASE_URL",
+    "OLLAMA_TIMEOUT_SECONDS",
+    "OPENAI_COMPATIBLE_BASE_URL",
+    "OPENAI_COMPATIBLE_API_KEY",
+    "OPENAI_COMPATIBLE_TIMEOUT_SECONDS",
+    "OPENAI_COMPATIBLE_INPUT_COST_PER_MILLION_TOKENS",
+    "OPENAI_COMPATIBLE_OUTPUT_COST_PER_MILLION_TOKENS"
+)
+foreach ($key in $preservedProviderKeys) {
+    $value = $existingEnv[$key]
+    if ($value) {
+        $envLines += "$key=$value"
+    }
+}
+$envContent = ($envLines -join [Environment]::NewLine) + [Environment]::NewLine
 [System.IO.File]::WriteAllText(
     $projectEnvPath,
     $envContent,
