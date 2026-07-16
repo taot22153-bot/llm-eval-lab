@@ -3,6 +3,7 @@ import { AlertTriangle, CheckCircle2, Play, RefreshCw } from "lucide-react";
 
 import { ApplicationVersion } from "./applicationVersions";
 import ExecutionAssessment, { reviewReasonLabel } from "./ExecutionAssessment";
+import ReleaseDecisionPanel from "./ReleaseDecisionPanel";
 import { EvaluationSuiteSummary, listEvaluationSuites } from "./evaluationSuites";
 import {
   HumanReviewDetail,
@@ -45,7 +46,10 @@ function severityLabel(severity: EvaluationRunExecution["test_case_severity"]): 
 
 function ExecutionEvidence({ execution }: { execution: EvaluationRunExecution }) {
   return (
-    <article className={`comparison-evidence comparison-evidence--${execution.status}`}>
+    <article
+      id={`execution-${execution.id}`}
+      className={`comparison-evidence comparison-evidence--${execution.status}`}
+    >
       <div className="comparison-evidence__heading">
         <strong>{execution.test_case_title}</strong>
         <span>{execution.status}</span>
@@ -378,6 +382,9 @@ function EvaluationRunResult({ run }: { run: EvaluationRun }) {
           <VersionScoreSummary label="Candidate" summary={run.deterministic_summary.candidate} />
         </div>
       </section>
+      {run.status === "completed" ? (
+        <ReleaseDecisionPanel key={run.id} evaluationRunId={run.id} />
+      ) : null}
       <div className="comparison-columns">
         <VersionEvidence run={run} role="baseline" />
         <VersionEvidence run={run} role="candidate" />

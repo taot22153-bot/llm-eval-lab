@@ -71,6 +71,7 @@ export interface TestCaseExecution {
     prompt_tokens: number | null;
     completion_tokens: number | null;
     total_tokens: number | null;
+    cost_usd: number | null;
   } | null;
   latency_ms: number | null;
   error: { code: string; message: string } | null;

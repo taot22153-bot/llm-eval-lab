@@ -4,7 +4,8 @@ Local-first quality and safety evaluation for LLM applications.
 
 > Status: active development. Application Versions, a versioned sample Evaluation Suite,
 > provider-neutral Test Case execution, persisted Baseline/Candidate Evaluation Runs, and
-> layered deterministic/semantic evidence with an auditable Human Review workflow are implemented.
+> layered deterministic/semantic evidence with auditable Human Review and explainable Release
+> Decisions are implemented.
 
 ## Why this project
 
@@ -38,6 +39,11 @@ LLM Eval Lab is planned as a local Web console that compares a candidate applica
   deterministic rules, semantic judgment, and routing reason, then submit a required pass/fail
   outcome with rationale. A completed review is immutable, leaves the active queue, remains in
   resolved history, and appears beside the unchanged automatic evidence in Evaluation Runs.
+- Create immutable, versioned Release Rules covering blocking severity, new regressions, required
+  Human Review, correctness and safety thresholds, and optional latency and cost budgets.
+- Reproduce a `pass`, `fail`, or `manual review required` Release Decision from a completed run and
+  selected rule, retain every evidence fingerprint as immutable history, and link each blocking
+  reason back to its Test Case execution evidence.
 - Use local Ollama in the application while automated tests substitute a deterministic adapter behind
   the same provider-neutral boundary.
 - Verify the workflow with backend integration tests and frontend interaction tests.
@@ -79,13 +85,15 @@ npm --prefix frontend run build
 ```
 
 The browser regression command starts an isolated Vite server, provides deterministic API fixtures,
-submits and reopens a Human Review, and checks the Evaluation Runs layout at 390×844 and 1440×1000.
+submits and reopens a Human Review, recomputes its Release Decision, and checks the Evaluation Runs
+layout at 390×844 and 1440×1000.
 It uses installed Microsoft Edge on Windows; set `PLAYWRIGHT_BROWSER=chrome` to exercise the same
 Chrome channel used in CI. The command pins the Playwright CLI version and does not install or
 download a browser.
 
 The setup and start scripts both run the idempotent sample seed. To verify it directly,
-run the command twice; both runs should report the same eight-case suite:
+run the command twice; both runs should report the same eight-case suite and default local Release
+Rule:
 
 ```powershell
 .\.venv\Scripts\python.exe -m llm_eval_lab.sample_suite
@@ -131,6 +139,10 @@ Automated verification does not require Ollama or a model download.
    column. Inspect the deterministic summary, open **Inspect rule evidence** on a failed case, then
    compare the separate semantic rationale and confidence. Any conflict or judge problem appears in
    the **Human Review queue**. Refresh the page and confirm the latest comparison returns.
+4. In **Release Decision**, load the versioned rules and history, inspect the visible thresholds, and
+   choose **Produce Release Decision**. Follow any reason link directly to the supporting execution.
+5. If the result requires Human Review, resolve the queued item and produce the decision again. The
+   new evidence fingerprint is retained beside the earlier immutable snapshot.
 
 An Evaluation Run reaches **completed** after every queued execution reaches a terminal state. Its
 individual executions may still be **failed**; those provider errors remain visible evidence instead
@@ -142,11 +154,16 @@ not treat paraphrases as matches. The versioned `structured-semantic-v1` judge h
 the same provider-neutral model boundary while retaining a configuration snapshot. Its answer never
 overwrites deterministic evidence or silently decides a release.
 
+A Release Rule cannot disable release-blocking failures or important new regressions. A decisive
+automatic failure or failed Candidate Human Review blocks release; otherwise unresolved or missing
+evidence requires review. Human Review remains a separate execution-level gate and never rewrites
+the displayed deterministic correctness or safety rates.
+
 When an existing database upgrades from migration 0004, migration 0005 scores every previously
 completed stored response and restores Baseline/Candidate regression classifications, so historical
 runs do not silently appear unscored.
 
-## Planned evaluation flow
+## Evaluation flow
 
 1. Define immutable baseline and candidate application versions.
 2. Run the same versioned evaluation suite against both versions.

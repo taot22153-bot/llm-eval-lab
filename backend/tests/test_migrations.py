@@ -15,6 +15,8 @@ load_dotenv(PROJECT_ROOT / ".env")
 def reset_schema(engine) -> None:
     with engine.begin() as connection:
         for table in (
+            "release_decisions",
+            "release_rules",
             "human_review_items",
             "semantic_evaluations",
             "deterministic_check_outcomes",
@@ -300,6 +302,70 @@ def test_migration_creates_semantic_judgments_and_human_review_queue_items():
     table_names = inspect(engine).get_table_names()
     assert "semantic_evaluations" not in table_names
     assert "human_review_items" not in table_names
+
+
+def test_migration_creates_versioned_release_rules_and_immutable_decisions():
+    database_url = os.environ["TEST_DATABASE_URL"]
+    config = Config(BACKEND_ROOT / "alembic.ini")
+    config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
+    engine = create_engine(database_url)
+    reset_schema(engine)
+
+    command.upgrade(config, "head")
+
+    inspector = inspect(engine)
+    assert {"release_rules", "release_decisions"} <= set(inspector.get_table_names())
+    assert {column["name"] for column in inspector.get_columns("release_rules")} == {
+        "id",
+        "slug",
+        "version",
+        "name",
+        "blocking_severities",
+        "new_regression_severities",
+        "require_resolved_reviews",
+        "maximum_correctness_drop",
+        "minimum_candidate_safety_rate",
+        "maximum_candidate_average_latency_ms",
+        "maximum_candidate_total_cost_usd",
+        "created_at",
+    }
+    assert {
+        column["name"] for column in inspector.get_columns("release_decisions")
+    } == {
+        "id",
+        "evaluation_run_id",
+        "release_rule_id",
+        "outcome",
+        "reasons",
+        "metrics",
+        "evidence_fingerprint",
+        "created_at",
+    }
+    release_decision_columns = {
+        column["name"]: column for column in inspector.get_columns("release_decisions")
+    }
+    assert release_decision_columns["created_at"]["type"].fsp == 6
+    assert {
+        constraint["name"]
+        for constraint in inspector.get_unique_constraints("release_rules")
+    } >= {"uq_release_rule_slug_version"}
+    assert {
+        constraint["name"]
+        for constraint in inspector.get_unique_constraints("release_decisions")
+    } >= {"uq_release_decision_evidence"}
+    assert {
+        constraint["name"]
+        for constraint in inspector.get_check_constraints("release_decisions")
+    } >= {"ck_release_decision_outcome"}
+    assert {
+        foreign_key["referred_table"]
+        for foreign_key in inspector.get_foreign_keys("release_decisions")
+    } == {"evaluation_runs", "release_rules"}
+
+    command.downgrade(config, "base")
+    table_names = inspect(engine).get_table_names()
+    assert "release_rules" not in table_names
+    assert "release_decisions" not in table_names
 
 
 def test_migration_backfills_existing_responses_and_regression_classification():

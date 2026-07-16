@@ -47,7 +47,12 @@ class DeterministicModelAdapter:
         assert request.generation_parameters == {"temperature": 0}
         return ModelResponse(
             content="The EchoBud X1 costs $79 and comes in black or silver.",
-            usage=ModelUsage(prompt_tokens=51, completion_tokens=14, total_tokens=65),
+            usage=ModelUsage(
+                prompt_tokens=51,
+                completion_tokens=14,
+                total_tokens=65,
+                cost_usd=0.0123,
+            ),
         )
 
 
@@ -169,6 +174,7 @@ def test_evaluation_user_can_execute_one_test_case_and_reopen_the_result():
             "prompt_tokens": 51,
             "completion_tokens": 14,
             "total_tokens": 65,
+            "cost_usd": 0.0123,
         },
         "latency_ms": detail_response.json()["latency_ms"],
         "error": None,
