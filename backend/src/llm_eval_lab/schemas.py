@@ -78,6 +78,7 @@ class ModelUsageRead(BaseModel):
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
     total_tokens: int | None = None
+    cost_usd: float | None = Field(default=None, ge=0)
 
 
 class ModelFailureRead(BaseModel):
@@ -273,6 +274,96 @@ class EvaluationRunRead(BaseModel):
     def serialize_datetime(self, value: datetime | None) -> str | None:
         if value is None:
             return None
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=UTC)
+        return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+Severity = Literal["normal", "important", "release_blocking"]
+
+
+class ReleaseRuleCreate(BaseModel):
+    slug: str = Field(min_length=1, max_length=120)
+    version: int = Field(ge=1)
+    name: str = Field(min_length=1, max_length=160)
+    blocking_severities: list[Severity] = Field(min_length=1)
+    new_regression_severities: list[Severity] = Field(min_length=1)
+    require_resolved_reviews: bool
+    maximum_correctness_drop: float = Field(ge=0, le=1)
+    minimum_candidate_safety_rate: float = Field(ge=0, le=1)
+    maximum_candidate_average_latency_ms: int | None = Field(default=None, ge=0)
+    maximum_candidate_total_cost_usd: float | None = Field(default=None, ge=0)
+
+    @field_validator("blocking_severities", "new_regression_severities")
+    @classmethod
+    def validate_unique_severities(cls, value: list[Severity]) -> list[Severity]:
+        if len(value) != len(set(value)):
+            raise ValueError("Release Rule severities must be unique.")
+        return value
+
+    @field_validator("blocking_severities")
+    @classmethod
+    def require_release_blocking_gate(cls, value: list[Severity]) -> list[Severity]:
+        if "release_blocking" not in value:
+            raise ValueError("Release-blocking failures cannot be disabled.")
+        return value
+
+    @field_validator("new_regression_severities")
+    @classmethod
+    def require_important_regression_gate(
+        cls,
+        value: list[Severity],
+    ) -> list[Severity]:
+        if "important" not in value:
+            raise ValueError("Important new regressions cannot be disabled.")
+        return value
+
+
+class ReleaseRuleRead(ReleaseRuleCreate):
+    id: str
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+    @field_serializer("created_at")
+    def serialize_created_at(self, value: datetime) -> str:
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=UTC)
+        return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+class ReleaseDecisionCreate(BaseModel):
+    evaluation_run_id: str
+    release_rule_id: str
+
+
+class ReleaseDecisionReasonRead(BaseModel):
+    code: str
+    message: str
+    execution_ids: list[str]
+    observed: JsonValue | None
+    threshold: JsonValue | None
+
+
+class ReleaseDecisionRuleRead(BaseModel):
+    id: str
+    slug: str
+    version: int
+    name: str
+
+
+class ReleaseDecisionRead(BaseModel):
+    id: str
+    evaluation_run_id: str
+    release_rule: ReleaseDecisionRuleRead
+    outcome: Literal["pass", "fail", "manual_review_required"]
+    reasons: list[ReleaseDecisionReasonRead]
+    metrics: dict[str, JsonValue]
+    evidence_fingerprint: str
+    created_at: datetime
+
+    @field_serializer("created_at")
+    def serialize_created_at(self, value: datetime) -> str:
         if value.tzinfo is None:
             value = value.replace(tzinfo=UTC)
         return value.astimezone(UTC).isoformat().replace("+00:00", "Z")

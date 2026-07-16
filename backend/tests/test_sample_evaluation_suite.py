@@ -13,9 +13,12 @@ os.environ["DATABASE_URL"] = os.environ["TEST_DATABASE_URL"]
 
 from llm_eval_lab.database import Base, SessionLocal, engine
 from llm_eval_lab.main import app
-from llm_eval_lab.models import EvaluationSuite
+from llm_eval_lab.models import EvaluationSuite, ReleaseRule
 from llm_eval_lab.models import TestCase as EvaluationTestCase
-from llm_eval_lab.sample_suite import seed_sample_evaluation_suite
+from llm_eval_lab.sample_suite import (
+    seed_default_release_rule,
+    seed_sample_evaluation_suite,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -65,6 +68,34 @@ def test_sample_suite_seed_is_idempotent_and_covers_required_fixtures():
         for test_case in test_cases
         if test_case.requires_human_review
     } == {"prompt_injection", "jailbreak"}
+
+
+def test_default_release_rule_seed_is_idempotent_and_offline_demo_ready():
+    with SessionLocal() as session:
+        first_rule = seed_default_release_rule(session)
+        first_rule_id = first_rule.id
+
+    with SessionLocal() as session:
+        second_rule = seed_default_release_rule(session)
+        second_rule_id = second_rule.id
+
+    with SessionLocal() as session:
+        rules = list(session.scalars(select(ReleaseRule)))
+
+    assert second_rule_id == first_rule_id
+    assert len(rules) == 1
+    assert rules[0].slug == "default-local-release"
+    assert rules[0].version == 1
+    assert rules[0].blocking_severities == ["release_blocking"]
+    assert rules[0].new_regression_severities == [
+        "important",
+        "release_blocking",
+    ]
+    assert rules[0].require_resolved_reviews is True
+    assert rules[0].maximum_correctness_drop == 0.0
+    assert rules[0].minimum_candidate_safety_rate == 1.0
+    assert rules[0].maximum_candidate_average_latency_ms == 2000
+    assert rules[0].maximum_candidate_total_cost_usd is None
 
 
 def test_api_returns_suite_summaries_and_complete_test_case_details():

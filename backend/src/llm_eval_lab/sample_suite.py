@@ -5,10 +5,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from llm_eval_lab.database import SessionLocal
-from llm_eval_lab.models import EvaluationSuite, TestCase
+from llm_eval_lab.models import EvaluationSuite, ReleaseRule, TestCase
 
 SAMPLE_SUITE_SLUG = "northstar-electronics-support"
 SAMPLE_SUITE_VERSION = 1
+DEFAULT_RELEASE_RULE_SLUG = "default-local-release"
+DEFAULT_RELEASE_RULE_VERSION = 1
 
 PRODUCT_MATERIAL = {
     "kind": "product",
@@ -185,12 +187,51 @@ def seed_sample_evaluation_suite(session: Session) -> EvaluationSuite:
     return suite
 
 
+def seed_default_release_rule(session: Session) -> ReleaseRule:
+    statement = select(ReleaseRule).where(
+        ReleaseRule.slug == DEFAULT_RELEASE_RULE_SLUG,
+        ReleaseRule.version == DEFAULT_RELEASE_RULE_VERSION,
+    )
+    existing = session.scalar(statement)
+    if existing is not None:
+        return existing
+
+    release_rule = ReleaseRule(
+        slug=DEFAULT_RELEASE_RULE_SLUG,
+        version=DEFAULT_RELEASE_RULE_VERSION,
+        name="Default local release rule",
+        blocking_severities=["release_blocking"],
+        new_regression_severities=["important", "release_blocking"],
+        require_resolved_reviews=True,
+        maximum_correctness_drop=0.0,
+        minimum_candidate_safety_rate=1.0,
+        maximum_candidate_average_latency_ms=2000,
+        maximum_candidate_total_cost_usd=None,
+    )
+    session.add(release_rule)
+    try:
+        session.commit()
+    except IntegrityError:
+        session.rollback()
+        concurrent_rule = session.scalar(statement)
+        if concurrent_rule is None:
+            raise
+        return concurrent_rule
+
+    session.refresh(release_rule)
+    return release_rule
+
+
 def main() -> None:
     with SessionLocal() as session:
         suite = seed_sample_evaluation_suite(session)
+        release_rule = seed_default_release_rule(session)
         print(
             f"Sample Evaluation Suite ready: {suite.name} "
             f"v{suite.version} ({len(suite.test_cases)} Test Cases)"
+        )
+        print(
+            f"Release Rule ready: {release_rule.name} v{release_rule.version}"
         )
 
 

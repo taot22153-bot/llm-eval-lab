@@ -217,6 +217,76 @@ async (page) => {
       },
     },
   });
+  const releaseRule = {
+    id: "mobile-release-rule",
+    slug: "default-local-release",
+    version: 1,
+    name: "Default local release rule",
+    blocking_severities: ["release_blocking"],
+    new_regression_severities: ["important", "release_blocking"],
+    require_resolved_reviews: true,
+    maximum_correctness_drop: 0,
+    minimum_candidate_safety_rate: 1,
+    maximum_candidate_average_latency_ms: 2000,
+    maximum_candidate_total_cost_usd: null,
+    created_at: "2026-07-15T00:00:00Z",
+  };
+  const releaseDecision = (resolved) => ({
+    id: resolved ? "mobile-release-pass" : "mobile-release-manual",
+    evaluation_run_id: run.id,
+    release_rule: {
+      id: releaseRule.id,
+      slug: releaseRule.slug,
+      version: releaseRule.version,
+      name: releaseRule.name,
+    },
+    outcome: resolved ? "pass" : "manual_review_required",
+    reasons: resolved
+      ? [{
+          code: "all_release_conditions_passed",
+          message: "All configured release conditions passed.",
+          execution_ids: [],
+          observed: null,
+          threshold: null,
+        }]
+      : [{
+          code: "unresolved_human_review",
+          message: "Keep all progress evidence readable requires Human Review.",
+          execution_ids: ["candidate-execution"],
+          observed: "pending",
+          threshold: "resolved",
+        }],
+    metrics: {
+      correctness: {
+        baseline_rate: 1,
+        candidate_rate: 1,
+        delta: 0,
+        maximum_drop: 0,
+        status: "pass",
+      },
+      safety: {
+        baseline_rate: 1,
+        candidate_rate: 1,
+        minimum_candidate_rate: 1,
+        status: "pass",
+      },
+      latency: {
+        baseline_average_ms: 5,
+        candidate_average_ms: 5,
+        maximum_candidate_average_ms: 2000,
+        status: "pass",
+      },
+      cost: {
+        baseline_total_usd: null,
+        candidate_total_usd: null,
+        maximum_candidate_total_usd: null,
+        status: "not_configured",
+      },
+    },
+    evidence_fingerprint: (resolved ? "b" : "a").repeat(64),
+    created_at: resolved ? "2026-07-15T00:06:00Z" : "2026-07-15T00:04:00Z",
+  });
+  let releaseDecisionHistory = [];
 
   const consoleIssues = [];
   page.on("console", (message) => {
@@ -242,6 +312,17 @@ async (page) => {
     else if (pathname === "/api/human-review-items/mobile-review") {
       if (request.method() === "PATCH") reviewResolved = true;
       body = reviewDetail(reviewResolved);
+    }
+    else if (pathname === "/api/release-rules") body = [releaseRule];
+    else if (pathname === "/api/release-decisions") {
+      if (request.method() === "POST") {
+        const produced = releaseDecision(reviewResolved);
+        releaseDecisionHistory = [
+          produced,
+          ...releaseDecisionHistory.filter((item) => item.id !== produced.id),
+        ];
+        body = produced;
+      } else body = releaseDecisionHistory;
     }
     else if (pathname === "/api/test-case-executions") body = singleExecution;
     else body = { detail: `Unexpected browser fixture request: ${pathname}` };
@@ -304,6 +385,15 @@ async (page) => {
   await page.getByText("Semantic fail").waitFor();
   await assertViewport(390, 844, 3);
   await assertViewport(1440, 1000, 5);
+  const releasePanel = page.getByRole("region", { name: "Release Decision" });
+  await releasePanel.getByRole("button", { name: "Load Release Decision" }).click();
+  await releasePanel.getByLabel("Release Rule").waitFor();
+  await releasePanel.getByRole("button", { name: "Produce Release Decision" }).click();
+  await releasePanel.getByRole("heading", { name: "Manual review required" }).waitFor();
+  await releasePanel.getByText(
+    "Keep all progress evidence readable requires Human Review.",
+  ).waitFor();
+  await releasePanel.getByRole("link", { name: "Execution evidence" }).waitFor();
   const reviewQueue = page.getByRole("region", { name: "Human Review queue" });
   const reviewButtonName = "Review Keep all progress evidence readable for Mobile candidate (candidate, run mobile-run)";
   await reviewQueue.getByRole("button", { name: reviewButtonName }).click();
@@ -331,6 +421,10 @@ async (page) => {
   await reopenedReview.getByText("Deterministic pass").waitFor();
   await reopenedReview.getByText("Semantic fail").waitFor();
   await reopenedReview.getByText("Matched response: Persisted response evidence.").waitFor();
+  await releasePanel.getByRole("button", { name: "Produce Release Decision" }).click();
+  await releasePanel.getByRole("heading", { name: "Pass" }).waitFor();
+  await releasePanel.getByText("All configured release conditions passed.").waitFor();
+  await releasePanel.getByText("2 immutable snapshots").waitFor();
   await assertViewport(390, 844, 3);
   await assertViewport(1440, 1000, 5);
   await page.getByRole("button", { name: "Test Case Execution" }).click();

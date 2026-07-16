@@ -205,6 +205,7 @@ def run_test_case_execution(
                 "prompt_tokens": response.usage.prompt_tokens,
                 "completion_tokens": response.usage.completion_tokens,
                 "total_tokens": response.usage.total_tokens,
+                "cost_usd": response.usage.cost_usd,
             }
             deterministic_score = VersionedDeterministicScorer().score(
                 response=response.content,

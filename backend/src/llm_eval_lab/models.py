@@ -16,6 +16,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
+from sqlalchemy.dialects.mysql import DATETIME as MySQLDateTime
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from llm_eval_lab.database import Base
@@ -134,6 +135,10 @@ class EvaluationRun(Base):
         back_populates="evaluation_run",
         cascade="all, delete-orphan",
     )
+    release_decisions: Mapped[list[ReleaseDecision]] = relationship(
+        back_populates="evaluation_run",
+        cascade="all, delete-orphan",
+    )
 
 
 class TestCaseExecution(Base):
@@ -172,7 +177,7 @@ class TestCaseExecution(Base):
     status: Mapped[str] = mapped_column(String(24), default="pending")
     prompt_context: Mapped[dict[str, Any]] = mapped_column(JSON)
     model_response: Mapped[str | None] = mapped_column(Text, nullable=True)
-    usage: Mapped[dict[str, int | None] | None] = mapped_column(JSON, nullable=True)
+    usage: Mapped[dict[str, int | float | None] | None] = mapped_column(JSON, nullable=True)
     latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     error: Mapped[dict[str, str] | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -343,3 +348,89 @@ class HumanReviewItem(Base):
         nullable=True,
     )
     execution: Mapped[TestCaseExecution] = relationship(back_populates="human_review_item")
+
+
+class ReleaseRule(Base):
+    __tablename__ = "release_rules"
+    __table_args__ = (
+        UniqueConstraint("slug", "version", name="uq_release_rule_slug_version"),
+        CheckConstraint("version >= 1", name="ck_release_rule_version"),
+        CheckConstraint(
+            "maximum_correctness_drop >= 0 AND maximum_correctness_drop <= 1",
+            name="ck_release_rule_correctness_drop",
+        ),
+        CheckConstraint(
+            "minimum_candidate_safety_rate >= 0 "
+            "AND minimum_candidate_safety_rate <= 1",
+            name="ck_release_rule_safety_rate",
+        ),
+        CheckConstraint(
+            "maximum_candidate_average_latency_ms IS NULL "
+            "OR maximum_candidate_average_latency_ms >= 0",
+            name="ck_release_rule_latency_budget",
+        ),
+        CheckConstraint(
+            "maximum_candidate_total_cost_usd IS NULL "
+            "OR maximum_candidate_total_cost_usd >= 0",
+            name="ck_release_rule_cost_budget",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    slug: Mapped[str] = mapped_column(String(120))
+    version: Mapped[int] = mapped_column(Integer)
+    name: Mapped[str] = mapped_column(String(160))
+    blocking_severities: Mapped[list[str]] = mapped_column(JSON)
+    new_regression_severities: Mapped[list[str]] = mapped_column(JSON)
+    require_resolved_reviews: Mapped[bool] = mapped_column(Boolean)
+    maximum_correctness_drop: Mapped[float] = mapped_column(Float)
+    minimum_candidate_safety_rate: Mapped[float] = mapped_column(Float)
+    maximum_candidate_average_latency_ms: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+    maximum_candidate_total_cost_usd: Mapped[float | None] = mapped_column(
+        Float,
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+    )
+    decisions: Mapped[list[ReleaseDecision]] = relationship(back_populates="release_rule")
+
+
+class ReleaseDecision(Base):
+    __tablename__ = "release_decisions"
+    __table_args__ = (
+        UniqueConstraint(
+            "evaluation_run_id",
+            "release_rule_id",
+            "evidence_fingerprint",
+            name="uq_release_decision_evidence",
+        ),
+        CheckConstraint(
+            "outcome IN ('pass', 'fail', 'manual_review_required')",
+            name="ck_release_decision_outcome",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    evaluation_run_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("evaluation_runs.id", ondelete="CASCADE"),
+    )
+    release_rule_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("release_rules.id", ondelete="RESTRICT"),
+    )
+    outcome: Mapped[str] = mapped_column(String(40))
+    reasons: Mapped[list[dict[str, Any]]] = mapped_column(JSON)
+    metrics: Mapped[dict[str, Any]] = mapped_column(JSON)
+    evidence_fingerprint: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(
+        MySQLDateTime(fsp=6),
+        default=lambda: datetime.now(UTC),
+    )
+    evaluation_run: Mapped[EvaluationRun] = relationship(back_populates="release_decisions")
+    release_rule: Mapped[ReleaseRule] = relationship(back_populates="decisions")

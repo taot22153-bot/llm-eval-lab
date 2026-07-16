@@ -515,6 +515,71 @@ const resolvedReviewDetail = {
   },
 };
 
+const defaultReleaseRule = {
+  id: "release-rule-01",
+  slug: "default-local-release",
+  version: 1,
+  name: "Default local release rule",
+  blocking_severities: ["release_blocking"],
+  new_regression_severities: ["important", "release_blocking"],
+  require_resolved_reviews: true,
+  maximum_correctness_drop: 0,
+  minimum_candidate_safety_rate: 1,
+  maximum_candidate_average_latency_ms: 2000,
+  maximum_candidate_total_cost_usd: null,
+  created_at: "2026-07-15T00:00:00Z",
+};
+
+const failedReleaseDecision = {
+  id: "release-decision-01",
+  evaluation_run_id: scoredEvaluationRun.id,
+  release_rule: {
+    id: defaultReleaseRule.id,
+    slug: defaultReleaseRule.slug,
+    version: defaultReleaseRule.version,
+    name: defaultReleaseRule.name,
+  },
+  outcome: "fail",
+  reasons: [
+    {
+      code: "release_blocking_failure",
+      message: "Surface a new release-blocking regression failed at a blocking severity.",
+      execution_ids: ["02-execution"],
+      observed: "release_blocking",
+      threshold: ["release_blocking"],
+    },
+  ],
+  metrics: {
+    correctness: {
+      baseline_rate: 1,
+      candidate_rate: 1,
+      delta: 0,
+      maximum_drop: 0,
+      status: "pass",
+    },
+    safety: {
+      baseline_rate: 1,
+      candidate_rate: 0,
+      minimum_candidate_rate: 1,
+      status: "fail",
+    },
+    latency: {
+      baseline_average_ms: 125,
+      candidate_average_ms: 125,
+      maximum_candidate_average_ms: 2000,
+      status: "pass",
+    },
+    cost: {
+      baseline_total_usd: null,
+      candidate_total_usd: null,
+      maximum_candidate_total_usd: null,
+      status: "not_configured",
+    },
+  },
+  evidence_fingerprint: "a".repeat(64),
+  created_at: "2026-07-15T00:06:00Z",
+};
+
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -888,6 +953,152 @@ describe("Application Versions", () => {
     expect(within(candidateEvidence).getByText("Release blocking: 1")).toBeInTheDocument();
     const scoreSummary = screen.getByRole("region", { name: "Deterministic score summary" });
     expect(within(scoreSummary).getByText("Release-blocking regressions: 1")).toBeInTheDocument();
+  });
+
+  it("produces an explainable Release Decision with thresholds, metrics, and evidence links", async () => {
+    const user = userEvent.setup();
+    fetchMock
+      .mockReset()
+      .mockResolvedValueOnce(jsonResponse([createdVersion, candidateVersion]))
+      .mockResolvedValueOnce(jsonResponse([sampleSuiteSummary]))
+      .mockResolvedValueOnce(jsonResponse([scoredEvaluationRun]))
+      .mockResolvedValueOnce(jsonResponse(pendingReviewItems))
+      .mockResolvedValueOnce(jsonResponse([defaultReleaseRule]))
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse(failedReleaseDecision, 201));
+
+    render(<App />);
+    expect(await screen.findByText(createdVersion.name)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Evaluation Runs" }));
+
+    const panel = await screen.findByRole("region", { name: "Release Decision" });
+    await user.click(
+      within(panel).getByRole("button", { name: "Load Release Decision" }),
+    );
+
+    expect(await within(panel).findByLabelText("Release Rule")).toHaveValue(
+      defaultReleaseRule.id,
+    );
+    expect(within(panel).getByText("Maximum correctness drop: 0%")).toBeInTheDocument();
+    expect(within(panel).getByText("Minimum candidate safety: 100%")).toBeInTheDocument();
+    expect(within(panel).getByText("Maximum candidate latency: 2000 ms")).toBeInTheDocument();
+    expect(within(panel).getByText("Maximum candidate cost: Not configured")).toBeInTheDocument();
+    expect(within(panel).getByText("Blocking failures: Release blocking")).toBeInTheDocument();
+    expect(
+      within(panel).getByText("New regression failures: Important · Release blocking"),
+    ).toBeInTheDocument();
+    await user.click(
+      within(panel).getByRole("button", { name: "Produce Release Decision" }),
+    );
+
+    expect(await within(panel).findByRole("heading", { name: "Fail" })).toBeInTheDocument();
+    expect(
+      within(panel).getByText(
+        "Surface a new release-blocking regression failed at a blocking severity.",
+      ),
+    ).toBeInTheDocument();
+    const correctnessMetric = within(panel).getByText("Correctness").closest("div");
+    const safetyMetric = within(panel).getByText("Safety").closest("div");
+    expect(correctnessMetric).not.toBeNull();
+    expect(safetyMetric).not.toBeNull();
+    expect(within(correctnessMetric as HTMLElement).getByText("Baseline 100%"))
+      .toBeInTheDocument();
+    expect(within(correctnessMetric as HTMLElement).getByText("Candidate 100%"))
+      .toBeInTheDocument();
+    expect(within(correctnessMetric as HTMLElement).getByText("Delta 0%"))
+      .toBeInTheDocument();
+    expect(within(safetyMetric as HTMLElement).getByText("Baseline 100%"))
+      .toBeInTheDocument();
+    expect(within(safetyMetric as HTMLElement).getByText("Candidate 0%"))
+      .toBeInTheDocument();
+    expect(within(panel).getByText("Observed: Release blocking")).toBeInTheDocument();
+    expect(within(panel).getByText("Threshold: Release blocking")).toBeInTheDocument();
+    expect(within(panel).getByRole("link", { name: "Execution evidence" })).toHaveAttribute(
+      "href",
+      "#execution-02-execution",
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(7, "/api/release-decisions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        evaluation_run_id: scoredEvaluationRun.id,
+        release_rule_id: defaultReleaseRule.id,
+      }),
+    });
+  });
+
+  it("clears a loaded Release Decision when review navigation selects another run", async () => {
+    const user = userEvent.setup();
+    fetchMock
+      .mockReset()
+      .mockResolvedValueOnce(jsonResponse([createdVersion, candidateVersion]))
+      .mockResolvedValueOnce(jsonResponse([sampleSuiteSummary, historicalSuiteSummary]))
+      .mockResolvedValueOnce(jsonResponse([scoredEvaluationRun]))
+      .mockResolvedValueOnce(jsonResponse([historicalReviewItem]))
+      .mockResolvedValueOnce(jsonResponse([defaultReleaseRule]))
+      .mockResolvedValueOnce(jsonResponse([failedReleaseDecision]))
+      .mockResolvedValueOnce(jsonResponse(historicalReviewDetail))
+      .mockResolvedValueOnce(jsonResponse(historicalEvaluationRun));
+
+    render(<App />);
+    expect(await screen.findByText(createdVersion.name)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Evaluation Runs" }));
+
+    let panel = await screen.findByRole("region", { name: "Release Decision" });
+    await user.click(
+      within(panel).getByRole("button", { name: "Load Release Decision" }),
+    );
+    expect(await within(panel).findByRole("heading", { name: "Fail" })).toBeInTheDocument();
+
+    const queue = screen.getByRole("region", { name: "Human Review queue" });
+    await user.click(
+      within(queue).getByRole("button", {
+        name: reviewButtonName(historicalReviewItem),
+      }),
+    );
+    await screen.findByRole("region", { name: "Human Review detail" });
+    expect(screen.getByRole("heading", { name: historicalSuiteSummary.name + " v2" }))
+      .toBeInTheDocument();
+    panel = screen.getByRole("region", { name: "Release Decision" });
+    expect(
+      within(panel).getByRole("button", { name: "Load Release Decision" }),
+    ).toBeInTheDocument();
+    expect(within(panel).queryByRole("heading", { name: "Fail" })).not.toBeInTheDocument();
+  });
+
+  it("locks the selected Release Rule while a decision request is in flight", async () => {
+    const user = userEvent.setup();
+    let resolveDecision: ((response: Response) => void) | undefined;
+    const delayedDecision = new Promise<Response>((resolve) => {
+      resolveDecision = resolve;
+    });
+    fetchMock
+      .mockReset()
+      .mockResolvedValueOnce(jsonResponse([createdVersion, candidateVersion]))
+      .mockResolvedValueOnce(jsonResponse([sampleSuiteSummary]))
+      .mockResolvedValueOnce(jsonResponse([scoredEvaluationRun]))
+      .mockResolvedValueOnce(jsonResponse(pendingReviewItems))
+      .mockResolvedValueOnce(jsonResponse([defaultReleaseRule]))
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockReturnValueOnce(delayedDecision);
+
+    render(<App />);
+    expect(await screen.findByText(createdVersion.name)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Evaluation Runs" }));
+
+    const panel = await screen.findByRole("region", { name: "Release Decision" });
+    await user.click(
+      within(panel).getByRole("button", { name: "Load Release Decision" }),
+    );
+    const ruleSelector = await within(panel).findByLabelText("Release Rule");
+    await user.click(
+      within(panel).getByRole("button", { name: "Produce Release Decision" }),
+    );
+
+    expect(ruleSelector).toBeDisabled();
+    resolveDecision?.(jsonResponse(failedReleaseDecision, 201));
+    expect(await within(panel).findByRole("heading", { name: "Fail" })).toBeInTheDocument();
+    expect(ruleSelector).toBeEnabled();
   });
 
   it("separates semantic judgment from deterministic evidence and exposes the review queue", async () => {

@@ -55,7 +55,7 @@ def _evaluation_run_statement():
     )
 
 
-def _load_evaluation_run(session: Session, run_id: str) -> EvaluationRun | None:
+def load_evaluation_run(session: Session, run_id: str) -> EvaluationRun | None:
     statement = _evaluation_run_statement().where(EvaluationRun.id == run_id)
     return session.scalar(statement)
 
@@ -218,7 +218,7 @@ def run_evaluation_run(
     semantic_judge: SemanticJudge,
 ) -> None:
     with SessionLocal() as session:
-        evaluation_run = _load_evaluation_run(session, run_id)
+        evaluation_run = load_evaluation_run(session, run_id)
         if evaluation_run is None or evaluation_run.status != "pending":
             return
         evaluation_run.status = "running"
@@ -247,7 +247,7 @@ def run_evaluation_run(
                     session.commit()
 
     with SessionLocal() as session:
-        evaluation_run = _load_evaluation_run(session, run_id)
+        evaluation_run = load_evaluation_run(session, run_id)
         if evaluation_run is None:
             return
         _classify_regressions(evaluation_run)
@@ -323,7 +323,7 @@ def create_evaluation_run(
         )
     session.add(evaluation_run)
     session.commit()
-    evaluation_run = _load_evaluation_run(session, evaluation_run.id)
+    evaluation_run = load_evaluation_run(session, evaluation_run.id)
     if evaluation_run is None:
         raise RuntimeError("The Evaluation Run was not persisted.")
 
@@ -351,7 +351,7 @@ def list_evaluation_runs(
 
 @router.get("/{run_id}", response_model=EvaluationRunRead)
 def get_evaluation_run(run_id: str, session: DatabaseSession) -> dict[str, Any]:
-    evaluation_run = _load_evaluation_run(session, run_id)
+    evaluation_run = load_evaluation_run(session, run_id)
     if evaluation_run is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
