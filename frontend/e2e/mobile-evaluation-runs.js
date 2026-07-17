@@ -471,7 +471,7 @@ async (page) => {
   await reviewPanel.getByText("Automatic score conflict", { exact: true }).waitFor();
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.screenshot({
-    path: "../docs/screenshots/demo-human-review.png",
+    path: "../output/playwright/demo-human-review.png",
     fullPage: true,
   });
   await reviewPanel.getByLabel("Human outcome").selectOption("fail");
@@ -498,7 +498,7 @@ async (page) => {
   ).waitFor();
   await releasePanel.getByText("2 immutable snapshots").waitFor();
   await page.screenshot({
-    path: "../docs/screenshots/demo-release-decision.png",
+    path: "../output/playwright/demo-release-decision.png",
     fullPage: true,
   });
   await assertViewport(390, 844, 3);

@@ -156,4 +156,5 @@ adapter, but it is disabled and unused in the core demo. The release path has no
 Prompts, responses, reviewer rationales, and decision snapshots stay in local MySQL. `.env`, local
 database files, logs, model files, Playwright sessions, and runtime artifacts are ignored and must
 not be committed. The two PNGs under `docs/screenshots` are synthetic browser-fixture evidence and
-contain no user data or credentials.
+contain no user data or credentials. Fresh browser-acceptance screenshots are written to the ignored
+`output/playwright` directory so verification does not rewrite the committed documentation evidence.

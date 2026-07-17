@@ -91,7 +91,8 @@ submits and reopens a Human Review, recomputes its Release Decision, and checks 
 layout at 390×844 and 1440×1000.
 It uses installed Microsoft Edge on Windows; set `PLAYWRIGHT_BROWSER=chrome` to exercise the same
 Chrome channel used in CI. The command pins the Playwright CLI version and does not install or
-download a browser.
+download a browser. Per-run screenshots are written to the ignored `output/playwright` directory;
+the reviewed synthetic evidence under `docs/screenshots` is not rewritten by verification.
 
 The setup and start scripts both run the idempotent sample seed. To verify it directly,
 run the command twice; both runs should report the same eight-case suite and default local Release

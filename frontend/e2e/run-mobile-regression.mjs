@@ -1,4 +1,6 @@
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -15,6 +17,33 @@ const npxInvocation = isWindows
 const browser = process.env.PLAYWRIGHT_BROWSER ?? (process.env.CI ? "chrome" : "msedge");
 const session = `mobile-regression-${process.pid}`;
 const serverOutput = [];
+const trackedDocumentationScreenshots = [
+  "demo-human-review.png",
+  "demo-release-decision.png",
+].map((fileName) => path.resolve(frontendRoot, "..", "docs", "screenshots", fileName));
+
+async function captureFileHashes(filePaths) {
+  return new Map(
+    await Promise.all(
+      filePaths.map(async (filePath) => [
+        filePath,
+        createHash("sha256").update(await readFile(filePath)).digest("hex"),
+      ]),
+    ),
+  );
+}
+
+async function assertFilesUnchanged(originalHashes) {
+  const currentHashes = await captureFileHashes([...originalHashes.keys()]);
+  const changedFiles = [...originalHashes.entries()]
+    .filter(([filePath, originalHash]) => currentHashes.get(filePath) !== originalHash)
+    .map(([filePath]) => path.relative(frontendRoot, filePath).replaceAll("\\", "/"));
+  if (changedFiles.length > 0) {
+    throw new Error(
+      `Browser regression changed tracked documentation screenshots: ${changedFiles.join(", ")}`,
+    );
+  }
+}
 
 function terminateProcessTree(child) {
   return new Promise((resolve) => {
@@ -149,6 +178,9 @@ function runPlaywright(args, options) {
   );
 }
 
+const originalDocumentationScreenshotHashes = await captureFileHashes(
+  trackedDocumentationScreenshots,
+);
 await assertPortAvailable();
 const server = spawn(
   process.execPath,
@@ -194,6 +226,7 @@ try {
   if (assertionPayload.isError) {
     throw new Error(`Playwright browser assertion failed: ${assertionPayload.error}`);
   }
+  await assertFilesUnchanged(originalDocumentationScreenshotHashes);
   console.log(`Mobile Evaluation Runs browser regression passed in ${browser}.`);
 } finally {
   try {
