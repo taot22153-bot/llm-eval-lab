@@ -1,4 +1,8 @@
 async (page) => {
+  const artifactDirectory = "__LLM_EVAL_LAB_PLAYWRIGHT_OUTPUT_DIR__";
+  if (artifactDirectory.startsWith("__LLM_EVAL_LAB")) {
+    throw new Error("Browser artifact directory was not configured by the regression runner.");
+  }
   const versions = [
     {
       id: "baseline-version",
@@ -471,7 +475,7 @@ async (page) => {
   await reviewPanel.getByText("Automatic score conflict", { exact: true }).waitFor();
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.screenshot({
-    path: "../output/playwright/demo-human-review.png",
+    path: `${artifactDirectory}/demo-human-review.png`,
     fullPage: true,
   });
   await reviewPanel.getByLabel("Human outcome").selectOption("fail");
@@ -498,7 +502,7 @@ async (page) => {
   ).waitFor();
   await releasePanel.getByText("2 immutable snapshots").waitFor();
   await page.screenshot({
-    path: "../output/playwright/demo-release-decision.png",
+    path: `${artifactDirectory}/demo-release-decision.png`,
     fullPage: true,
   });
   await assertViewport(390, 844, 3);
