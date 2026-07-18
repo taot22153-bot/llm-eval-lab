@@ -92,7 +92,10 @@ layout at 390×844 and 1440×1000.
 It uses installed Microsoft Edge on Windows; set `PLAYWRIGHT_BROWSER=chrome` to exercise the same
 Chrome channel used in CI. The command pins the Playwright CLI version and does not install or
 download a browser. Per-run screenshots are written to the ignored `output/playwright` directory;
-the reviewed synthetic evidence under `docs/screenshots` is not rewritten by verification.
+the reviewed synthetic evidence under `docs/screenshots` is not rewritten by verification. The
+Playwright CLI runs from a unique operating-system temporary directory that is removed after both
+successful runs and startup failures, so repeated verification does not accumulate session state
+inside the repository.
 
 The setup and start scripts both run the idempotent sample seed. To verify it directly,
 run the command twice; both runs should report the same eight-case suite and default local Release

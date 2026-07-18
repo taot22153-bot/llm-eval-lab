@@ -1,7 +1,8 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
@@ -17,6 +18,13 @@ const npxInvocation = isWindows
 const browser = process.env.PLAYWRIGHT_BROWSER ?? (process.env.CI ? "chrome" : "msedge");
 const session = `mobile-regression-${process.pid}`;
 const serverOutput = [];
+const repositoryPlaywrightState = path.join(frontendRoot, ".playwright-cli");
+const browserProgramTemplate = path.join(frontendRoot, "e2e", "mobile-evaluation-runs.js");
+const browserArtifactDirectory = path.resolve(frontendRoot, "..", "output", "playwright");
+const browserArtifactPlaceholder = '"__LLM_EVAL_LAB_PLAYWRIGHT_OUTPUT_DIR__"';
+const browserArtifacts = ["demo-human-review.png", "demo-release-decision.png"].map(
+  (fileName) => path.join(browserArtifactDirectory, fileName),
+);
 const trackedDocumentationScreenshots = [
   "demo-human-review.png",
   "demo-release-decision.png",
@@ -43,6 +51,91 @@ async function assertFilesUnchanged(originalHashes) {
       `Browser regression changed tracked documentation screenshots: ${changedFiles.join(", ")}`,
     );
   }
+}
+
+async function captureDirectoryFileHashes(directory, relativeDirectory = "") {
+  const currentDirectory = path.join(directory, relativeDirectory);
+  let entries;
+  try {
+    entries = await readdir(currentDirectory, { withFileTypes: true });
+  } catch (error) {
+    if (error.code === "ENOENT") return new Map();
+    throw error;
+  }
+  const entryHashes = await Promise.all(
+    entries.map(async (entry) => {
+      const relativePath = path.join(relativeDirectory, entry.name);
+      if (entry.isDirectory()) {
+        return captureDirectoryFileHashes(directory, relativePath);
+      }
+      const filePath = path.join(directory, relativePath);
+      return new Map([
+        [relativePath, createHash("sha256").update(await readFile(filePath)).digest("hex")],
+      ]);
+    }),
+  );
+  return new Map(entryHashes.flatMap((hashes) => [...hashes.entries()]));
+}
+
+async function assertDirectoryFilesUnchanged(originalHashes, directory) {
+  const currentHashes = await captureDirectoryFileHashes(directory);
+  const allPaths = new Set([...originalHashes.keys(), ...currentHashes.keys()]);
+  const changedFiles = [...allPaths].filter(
+    (relativePath) => originalHashes.get(relativePath) !== currentHashes.get(relativePath),
+  );
+  if (changedFiles.length > 0) {
+    throw new Error(
+      `Browser regression changed repository Playwright state: ${changedFiles.join(", ")}`,
+    );
+  }
+}
+
+async function captureFileModificationTimes(filePaths) {
+  return new Map(
+    await Promise.all(
+      filePaths.map(async (filePath) => {
+        try {
+          return [filePath, (await stat(filePath, { bigint: true })).mtimeNs];
+        } catch (error) {
+          if (error.code === "ENOENT") return [filePath, null];
+          throw error;
+        }
+      }),
+    ),
+  );
+}
+
+async function assertFilesRefreshed(originalModificationTimes) {
+  const currentModificationTimes = await captureFileModificationTimes(
+    [...originalModificationTimes.keys()],
+  );
+  const staleFiles = [...originalModificationTimes.entries()]
+    .filter(
+      ([filePath, originalTime]) =>
+        currentModificationTimes.get(filePath) === null ||
+        currentModificationTimes.get(filePath) === originalTime,
+    )
+    .map(([filePath]) => path.relative(frontendRoot, filePath).replaceAll("\\", "/"));
+  if (staleFiles.length > 0) {
+    throw new Error(`Browser regression did not refresh runtime artifacts: ${staleFiles.join(", ")}`);
+  }
+}
+
+async function writeConfiguredBrowserProgram(workspace) {
+  const template = await readFile(browserProgramTemplate, "utf8");
+  if (
+    !template.includes(browserArtifactPlaceholder) ||
+    template.indexOf(browserArtifactPlaceholder) !== template.lastIndexOf(browserArtifactPlaceholder)
+  ) {
+    throw new Error("Browser program must contain exactly one artifact-directory placeholder.");
+  }
+  const configuredProgram = template.replace(
+    browserArtifactPlaceholder,
+    JSON.stringify(browserArtifactDirectory),
+  );
+  const configuredProgramPath = path.join(workspace, "mobile-evaluation-runs.js");
+  await writeFile(configuredProgramPath, configuredProgram, "utf8");
+  return configuredProgramPath;
 }
 
 function terminateProcessTree(child) {
@@ -75,13 +168,13 @@ function terminateProcessTree(child) {
 function run(
   command,
   args,
-  { allowFailure = false, stdio = "inherit", timeoutMs = 60_000 } = {},
+  { allowFailure = false, cwd = frontendRoot, stdio = "inherit", timeoutMs = 60_000 } = {},
 ) {
   return new Promise((resolve, reject) => {
     const output = [];
     let settled = false;
     const child = spawn(command, args, {
-      cwd: frontendRoot,
+      cwd,
       detached: !isWindows,
       stdio,
       windowsHide: true,
@@ -162,7 +255,7 @@ async function stopServer(server) {
   throw new Error("Vite still owns port 5173 after browser regression cleanup.");
 }
 
-function runPlaywright(args, options) {
+function runPlaywright(args, options = {}) {
   return run(
     npxInvocation.command,
     [
@@ -174,38 +267,49 @@ function runPlaywright(args, options) {
       `-s=${session}`,
       ...args,
     ],
-    options,
+    { ...options, cwd: playwrightWorkspace },
   );
 }
 
 const originalDocumentationScreenshotHashes = await captureFileHashes(
   trackedDocumentationScreenshots,
 );
-await assertPortAvailable();
-const server = spawn(
-  process.execPath,
-  [
-    path.join(frontendRoot, "node_modules", "vite", "bin", "vite.js"),
-    "--host",
-    "127.0.0.1",
-    "--port",
-    "5173",
-    "--strictPort",
-  ],
-  {
-    cwd: frontendRoot,
-    detached: !isWindows,
-    stdio: ["ignore", "pipe", "pipe"],
-    windowsHide: true,
-  },
+const originalRepositoryPlaywrightHashes = await captureDirectoryFileHashes(
+  repositoryPlaywrightState,
 );
-server.stdout.on("data", (chunk) => serverOutput.push(chunk.toString()));
-server.stderr.on("data", (chunk) => serverOutput.push(chunk.toString()));
+const originalBrowserArtifactModificationTimes = await captureFileModificationTimes(
+  browserArtifacts,
+);
+const playwrightWorkspace = await mkdtemp(path.join(tmpdir(), "llm-eval-lab-playwright-"));
+let playwrightStarted = false;
+let server;
 
 try {
+  await assertPortAvailable();
+  const configuredBrowserProgram = await writeConfiguredBrowserProgram(playwrightWorkspace);
+  server = spawn(
+    process.execPath,
+    [
+      path.join(frontendRoot, "node_modules", "vite", "bin", "vite.js"),
+      "--host",
+      "127.0.0.1",
+      "--port",
+      "5173",
+      "--strictPort",
+    ],
+    {
+      cwd: frontendRoot,
+      detached: !isWindows,
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+    },
+  );
+  server.stdout.on("data", (chunk) => serverOutput.push(chunk.toString()));
+  server.stderr.on("data", (chunk) => serverOutput.push(chunk.toString()));
   console.log("Waiting for the Vite acceptance server...");
   await waitForServer();
   console.log(`Opening ${browser} through Playwright CLI...`);
+  playwrightStarted = true;
   await runPlaywright(["open", "about:blank", "--browser", browser]);
   console.log("Running mobile and desktop viewport assertions...");
   const assertionResult = await runPlaywright(
@@ -213,7 +317,7 @@ try {
       "--json",
       "run-code",
       "--filename",
-      path.join(frontendRoot, "e2e", "mobile-evaluation-runs.js"),
+      configuredBrowserProgram,
     ],
     { stdio: "pipe", timeoutMs: 120_000 },
   );
@@ -226,16 +330,24 @@ try {
   if (assertionPayload.isError) {
     throw new Error(`Playwright browser assertion failed: ${assertionPayload.error}`);
   }
+  await assertFilesRefreshed(originalBrowserArtifactModificationTimes);
   await assertFilesUnchanged(originalDocumentationScreenshotHashes);
   console.log(`Mobile Evaluation Runs browser regression passed in ${browser}.`);
 } finally {
   try {
-    try {
-      await runPlaywright(["close"], { allowFailure: true, timeoutMs: 20_000 });
-    } catch (error) {
-      console.warn(`Playwright cleanup warning: ${error.message}`);
+    if (playwrightStarted) {
+      try {
+        await runPlaywright(["close"], { allowFailure: true, timeoutMs: 20_000 });
+      } catch (error) {
+        console.warn(`Playwright cleanup warning: ${error.message}`);
+      }
     }
   } finally {
-    await stopServer(server);
+    try {
+      if (server) await stopServer(server);
+    } finally {
+      await rm(playwrightWorkspace, { recursive: true, force: true });
+    }
   }
 }
+await assertDirectoryFilesUnchanged(originalRepositoryPlaywrightHashes, repositoryPlaywrightState);
