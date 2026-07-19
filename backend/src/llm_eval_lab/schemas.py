@@ -279,6 +279,33 @@ class EvaluationRunRead(BaseModel):
         return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 
+class ExternalSafetyEvidenceRead(BaseModel):
+    id: str
+    evaluation_run_id: str
+    source_product: str
+    integration_contract: str
+    schema_version: str
+    source_digest: str
+    source_bundle_id: str
+    source_pair_id: str
+    baseline_agent_version_id: str
+    candidate_agent_version_id: str
+    baseline_evidence_fingerprint: str
+    candidate_evidence_fingerprint: str
+    baseline_verdict: Literal["effective", "ineffective", "inconclusive"]
+    candidate_verdict: Literal["effective", "ineffective", "inconclusive"]
+    divergence_summary: str
+    imported_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+    @field_serializer("imported_at")
+    def serialize_imported_at(self, value: datetime) -> str:
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=UTC)
+        return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
 Severity = Literal["normal", "important", "release_blocking"]
 
 

@@ -44,6 +44,11 @@ LLM Eval Lab is a local Web console that compares a candidate application versio
 - Reproduce a `pass`, `fail`, or `manual review required` Release Decision from a completed run and
   selected rule, retain every evidence fingerprint as immutable history, and link each blocking
   reason back to its Test Case execution evidence.
+- Import a versioned Agent Incident Replay Lab Validation Report JSON as immutable External Safety
+  Evidence on a completed run. The local canonical digest detects duplicate content without
+  claiming a signature; source fingerprints remain labeled producer claims. Candidate
+  `ineffective`, `inconclusive`, and `effective` verdicts become fail, manual-review, and positive
+  release evidence respectively, while the worst admitted report wins.
 - Use local Ollama in the application while automated tests substitute a deterministic adapter behind
   the same provider-neutral boundary.
 - Optionally use an environment-configured OpenAI-compatible Chat Completions endpoint while
@@ -87,6 +92,7 @@ npm --prefix frontend run build
 ```
 
 The browser regression command starts an isolated Vite server, provides deterministic API fixtures,
+selects the real sanitized producer report fixture, imports and displays External Safety Evidence,
 submits and reopens a Human Review, recomputes its Release Decision, and checks the Evaluation Runs
 layout at 390×844 and 1440×1000.
 It uses installed Microsoft Edge on Windows; set `PLAYWRIGHT_BROWSER=chrome` to exercise the same
@@ -201,7 +207,11 @@ not configure this provider and remains runnable without network access.
    compare the separate semantic rationale and confidence. Any conflict or judge problem appears in
    the **Human Review queue**. Refresh the page and confirm the latest comparison returns.
 4. In **Release Decision**, load the versioned rules and history, inspect the visible thresholds, and
-   choose **Produce Release Decision**. Follow any reason link directly to the supporting execution.
+   optionally select
+   `backend\tests\fixtures\agent-incident-validation-report.json` under **Validation Report JSON**
+   and choose **Import safety evidence**. Inspect its source product, schema, verdict, divergence,
+   local content digest, and source-claimed fingerprints, then choose **Produce Release Decision**.
+   Follow any reason link directly to the supporting execution.
 5. If the result requires Human Review, resolve the queued item and produce the decision again. The
    new evidence fingerprint is retained beside the earlier immutable snapshot.
 
@@ -218,7 +228,8 @@ overwrites deterministic evidence or silently decides a release.
 A Release Rule cannot disable release-blocking failures or important new regressions. A decisive
 automatic failure or failed Candidate Human Review blocks release; otherwise unresolved or missing
 evidence requires review. Human Review remains a separate execution-level gate and never rewrites
-the displayed deterministic correctness or safety rates.
+the displayed deterministic correctness or safety rates. Effective external evidence is positive
+but cannot override those local failures; ineffective external evidence is decisive.
 
 When an existing database upgrades from migration 0004, migration 0005 scores every previously
 completed stored response and restores Baseline/Candidate regression classifications, so historical
@@ -271,6 +282,8 @@ The store is only a demonstration fixture. The evaluation platform is not limite
 - **Evidence over a single score:** deterministic checks, semantic scoring, and human review remain distinguishable.
 - **Regression focused:** candidate results are always compared with a baseline.
 - **Explainable release gates:** blocking failures, important regressions, review state, latency, and cost all affect the decision.
+- **File-only evidence bridge:** an immutable versioned JSON file joins independently runnable
+  safety products without a shared database, package, process, or cloud service.
 - **Provider neutral:** Ollama, the optional OpenAI-compatible adapter, and the explicit offline
   demo fixture share one model boundary.
 - **No hidden cloud dependency:** cloud APIs and rented GPUs are optional enhancements.

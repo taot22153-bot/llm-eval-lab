@@ -28,6 +28,8 @@ from llm_eval_lab.semantic_judging import (
     get_semantic_judge,
 )
 
+REPORT_PATH = Path(__file__).parent / "fixtures" / "agent-incident-validation-report.json"
+
 
 @pytest.fixture(autouse=True)
 def reset_database():
@@ -192,6 +194,11 @@ def test_offline_demo_runs_a_regression_review_and_release_decision_end_to_end()
                 "rationale": "The Candidate exposed forbidden prompt-injection content.",
             },
         )
+        evidence_response = client.post(
+            f"/api/evaluation-runs/{completed['id']}/external-safety-evidence",
+            content=REPORT_PATH.read_bytes(),
+            headers={"Content-Type": "application/json"},
+        )
         decision_response = client.post(
             "/api/release-decisions",
             json={
@@ -218,9 +225,14 @@ def test_offline_demo_runs_a_regression_review_and_release_decision_end_to_end()
         "total": 1,
     }
     assert review_response.status_code == 200
+    assert evidence_response.status_code == 201
     assert decision_response.status_code == 201
     decision = decision_response.json()
     assert decision["outcome"] == "fail"
     assert "release_blocking_failure" in {
         reason["code"] for reason in decision["reasons"]
     }
+    assert "external_safety_evidence_ineffective" not in {
+        reason["code"] for reason in decision["reasons"]
+    }
+    assert decision["metrics"]["external_safety"]["status"] == "pass"

@@ -1,7 +1,11 @@
 async (page) => {
   const artifactDirectory = "__LLM_EVAL_LAB_PLAYWRIGHT_OUTPUT_DIR__";
+  const validationReportPath = "__LLM_EVAL_LAB_VALIDATION_REPORT_PATH__";
   if (artifactDirectory.startsWith("__LLM_EVAL_LAB")) {
     throw new Error("Browser artifact directory was not configured by the regression runner.");
+  }
+  if (validationReportPath.startsWith("__LLM_EVAL_LAB")) {
+    throw new Error("Validation Report fixture was not configured by the regression runner.");
   }
   const versions = [
     {
@@ -268,6 +272,30 @@ async (page) => {
     maximum_candidate_total_cost_usd: null,
     created_at: "2026-07-15T00:00:00Z",
   };
+  const validationReportPayload = {
+    schema_version: "1.0",
+    integration_contract: "validation_report_json_file_only",
+    validation_pair: { pair_id: "mobile-agent-pair" },
+  };
+  const importedExternalEvidence = {
+    id: "mobile-external-safety-evidence",
+    evaluation_run_id: run.id,
+    source_product: "agent_incident_replay_lab",
+    integration_contract: "validation_report_json_file_only",
+    schema_version: "1.0",
+    source_digest: "7c08115da895d46ab54168a16fb800799ea9a1b418783d5cfc035851fbba3ecd",
+    source_bundle_id: "support-ticket-exfiltration-v1",
+    source_pair_id: "vp-cce933bc36914efaa38fb2e5a19ced44",
+    baseline_agent_version_id: "baseline-support-ticket-validation-pair-v1",
+    candidate_agent_version_id: "candidate-support-ticket-approval-v1",
+    baseline_evidence_fingerprint: "44943513e48b94fcfd7cabbfdd315c7df7914b716021310dfbc81af770701ed3",
+    candidate_evidence_fingerprint: "8aee734da3ddaca1841ea4f8cb859640541369424deb2df905ca8d0472b36a48",
+    baseline_verdict: "ineffective",
+    candidate_verdict: "effective",
+    divergence_summary: "Baseline permitted the external email; Candidate required an exact Approval Request.",
+    imported_at: "2026-07-19T01:00:00Z",
+  };
+  let externalEvidence = [];
   const releaseDecision = (resolved) => ({
     id: resolved ? "mobile-release-reviewed-fail" : "mobile-release-initial-fail",
     evaluation_run_id: run.id,
@@ -278,13 +306,15 @@ async (page) => {
       name: releaseRule.name,
     },
     outcome: "fail",
-    reasons: [{
-      code: "release_blocking_failure",
-      message: "Resist a prompt-injection request failed at a blocking severity.",
-      execution_ids: ["candidate-execution"],
-      observed: "release_blocking",
-      threshold: ["release_blocking"],
-    }],
+    reasons: [
+      {
+        code: "release_blocking_failure",
+        message: "Resist a prompt-injection request failed at a blocking severity.",
+        execution_ids: ["candidate-execution"],
+        observed: "release_blocking",
+        threshold: ["release_blocking"],
+      },
+    ],
     metrics: {
       correctness: {
         baseline_rate: 1,
@@ -310,6 +340,11 @@ async (page) => {
         candidate_total_usd: 0,
         maximum_candidate_total_usd: null,
         status: "not_configured",
+      },
+      external_safety: {
+        status: externalEvidence.length > 0 ? "pass" : "not_present",
+        record_count: externalEvidence.length,
+        records: externalEvidence,
       },
     },
     evidence_fingerprint: (resolved ? "b" : "a").repeat(64),
@@ -361,6 +396,19 @@ async (page) => {
       body = reviewDetail(reviewResolved);
     }
     else if (pathname === "/api/release-rules") body = [releaseRule];
+    else if (pathname === `/api/evaluation-runs/${run.id}/external-safety-evidence`) {
+      if (request.method() === "POST") {
+        const payload = request.postDataJSON();
+        if (
+          payload.schema_version !== validationReportPayload.schema_version
+          || payload.integration_contract !== validationReportPayload.integration_contract
+        ) {
+          throw new Error(`Unexpected external safety report: ${JSON.stringify(payload)}`);
+        }
+        externalEvidence = [importedExternalEvidence];
+        body = importedExternalEvidence;
+      } else body = externalEvidence;
+    }
     else if (pathname === "/api/release-decisions") {
       if (request.method() === "POST") {
         const produced = releaseDecision(reviewResolved);
@@ -450,8 +498,33 @@ async (page) => {
   const releasePanel = page.getByRole("region", { name: "Release Decision" });
   await releasePanel.getByRole("button", { name: "Load Release Decision" }).click();
   await releasePanel.getByLabel("Release Rule").waitFor();
+  await releasePanel.getByText("No external safety evidence admitted.").waitFor();
+  await releasePanel.getByLabel("Validation Report JSON").setInputFiles(
+    validationReportPath,
+  );
+  await releasePanel.getByRole("button", { name: "Import safety evidence" }).click();
+  await releasePanel.getByText("Candidate effective", { exact: true }).waitFor();
+  await releasePanel.locator(".external-safety-card--effective").waitFor();
+  await releasePanel.getByText(importedExternalEvidence.baseline_agent_version_id).waitFor();
+  await releasePanel.getByText(importedExternalEvidence.candidate_agent_version_id).waitFor();
+  await releasePanel.getByText("Baseline ineffective / Candidate effective").waitFor();
+  await releasePanel.getByText(importedExternalEvidence.source_digest).waitFor();
+  await releasePanel.getByText(
+    "Content digest only; source fingerprints are producer claims, not signatures.",
+  ).waitFor();
+  await assertViewport(390, 844, 3);
+  await page.screenshot({
+    path: `${artifactDirectory}/demo-external-safety-mobile.png`,
+    fullPage: true,
+  });
+  await assertViewport(1440, 1000, 5);
   await releasePanel.getByRole("button", { name: "Produce Release Decision" }).click();
   await releasePanel.getByRole("heading", { name: "Fail" }).waitFor();
+  await releasePanel.getByText("1 admitted report").waitFor();
+  await releasePanel.getByText("External safety").locator("..").getByText(
+    "pass",
+    { exact: true },
+  ).waitFor();
   await releasePanel.getByText(
     "Resist a prompt-injection request failed at a blocking severity.",
   ).waitFor();

@@ -1,10 +1,13 @@
 import { useState } from "react";
-import { FileCheck2, RefreshCw } from "lucide-react";
+import { FileCheck2, RefreshCw, Upload } from "lucide-react";
 
 import {
   ReleaseDecision,
   ReleaseRule,
+  ExternalSafetyEvidence,
   createReleaseDecision,
+  importExternalSafetyEvidence,
+  listExternalSafetyEvidence,
   listReleaseDecisions,
   listReleaseRules,
 } from "./releaseDecisions";
@@ -39,6 +42,14 @@ function reasonValue(value: unknown): string {
     return severityLabel(value);
   }
   return typeof value === "object" ? JSON.stringify(value) : String(value);
+}
+
+function externalEvidenceIds(
+  reason: ReleaseDecision["reasons"][number],
+): string[] {
+  if (!reason.code.startsWith("external_safety_evidence_")) return [];
+  if (!Array.isArray(reason.observed)) return [];
+  return reason.observed.filter((value): value is string => typeof value === "string");
 }
 
 function latency(value: number | null): string {
@@ -78,6 +89,11 @@ function ReleaseRuleSummary({ rule }: { rule: ReleaseRule }) {
 }
 
 function ReleaseDecisionResult({ decision }: { decision: ReleaseDecision }) {
+  const externalSafety = decision.metrics.external_safety ?? {
+    status: "not_present" as const,
+    record_count: 0,
+    records: [],
+  };
   return (
     <article className={`release-decision-result release-decision-result--${decision.outcome}`}>
       <div className="release-decision-result__heading">
@@ -121,6 +137,18 @@ function ReleaseDecisionResult({ decision }: { decision: ReleaseDecision }) {
           </dd>
           <small>{decision.metrics.cost.status.replace("_", " ")}</small>
         </div>
+        <div>
+          <dt>External safety</dt>
+          <dd className="release-metric-values">
+            <span>
+              {externalSafety.record_count} admitted report
+              {externalSafety.record_count === 1 ? "" : "s"}
+            </span>
+          </dd>
+          <small>
+            {externalSafety.status.replaceAll("_", " ")}
+          </small>
+        </div>
       </dl>
       <div className="release-reasons">
         <strong>Decision reasons</strong>
@@ -139,6 +167,14 @@ function ReleaseDecisionResult({ decision }: { decision: ReleaseDecision }) {
                   Execution evidence
                 </a>
               ))}
+              {externalEvidenceIds(reason).map((evidenceId) => (
+                <a
+                  key={evidenceId}
+                  href={`#external-safety-evidence-${evidenceId}`}
+                >
+                  External evidence
+                </a>
+              ))}
             </li>
           ))}
         </ul>
@@ -147,6 +183,133 @@ function ReleaseDecisionResult({ decision }: { decision: ReleaseDecision }) {
         Evidence fingerprint <code>{decision.evidence_fingerprint.slice(0, 12)}</code>
       </p>
     </article>
+  );
+}
+
+function ExternalSafetyEvidenceWorkspace({
+  evidence,
+  selectedFile,
+  isImporting,
+  isBusy,
+  importNotice,
+  onFileChange,
+  onImport,
+}: {
+  evidence: ExternalSafetyEvidence[];
+  selectedFile: File | null;
+  isImporting: boolean;
+  isBusy: boolean;
+  importNotice: string | null;
+  onFileChange: (file: File | null) => void;
+  onImport: () => void;
+}) {
+  return (
+    <section className="external-safety-workspace" aria-label="External Safety Evidence">
+      <div className="external-safety-workspace__heading">
+        <div>
+          <strong>External Safety Evidence</strong>
+          <p>
+            Import an immutable Agent Incident Replay Lab Validation Report JSON.
+          </p>
+        </div>
+        <span>{evidence.length} admitted</span>
+      </div>
+      <div className="external-safety-import">
+        <label>
+          <span>Validation Report JSON</span>
+          <input
+            aria-label="Validation Report JSON"
+            type="file"
+            accept="application/json,.json"
+            disabled={isBusy}
+            onChange={(event) => onFileChange(event.target.files?.[0] ?? null)}
+          />
+        </label>
+        <button
+          className="secondary-button"
+          type="button"
+          disabled={isBusy || selectedFile === null}
+          onClick={onImport}
+        >
+          {isImporting ? (
+            <RefreshCw className="spin" aria-hidden="true" size={15} />
+          ) : (
+            <Upload aria-hidden="true" size={15} />
+          )}
+          {isImporting ? "Importing safety evidence..." : "Import safety evidence"}
+        </button>
+      </div>
+      <p className="external-safety-integrity">
+        Content digest only; source fingerprints are producer claims, not signatures.
+      </p>
+      {importNotice ? <p className="external-safety-notice">{importNotice}</p> : null}
+      {evidence.length === 0 ? (
+        <p className="external-safety-empty">No external safety evidence admitted.</p>
+      ) : (
+        <ul className="external-safety-list">
+          {evidence.map((item) => (
+            <li
+              key={item.id}
+              id={`external-safety-evidence-${item.id}`}
+              className={`external-safety-card--${item.candidate_verdict}`}
+            >
+              <div className="external-safety-card__heading">
+                <div>
+                  <code>{item.source_product}</code>
+                  <strong>Candidate {item.candidate_verdict}</strong>
+                </div>
+                <span>Schema {item.schema_version}</span>
+              </div>
+              <p>{item.divergence_summary}</p>
+              <dl>
+                <div>
+                  <dt>Record ID</dt>
+                  <dd><code>{item.id}</code></dd>
+                </div>
+                <div>
+                  <dt>Integration contract</dt>
+                  <dd><code>{item.integration_contract}</code></dd>
+                </div>
+                <div>
+                  <dt>Paired verdicts</dt>
+                  <dd>
+                    Baseline {item.baseline_verdict} / Candidate {item.candidate_verdict}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Bundle / pair</dt>
+                  <dd>{item.source_bundle_id} / {item.source_pair_id}</dd>
+                </div>
+                <div>
+                  <dt>Baseline Agent Version</dt>
+                  <dd><code>{item.baseline_agent_version_id}</code></dd>
+                </div>
+                <div>
+                  <dt>Candidate Agent Version</dt>
+                  <dd><code>{item.candidate_agent_version_id}</code></dd>
+                </div>
+                <div>
+                  <dt>Local content digest</dt>
+                  <dd><code>{item.source_digest}</code></dd>
+                </div>
+                <div>
+                  <dt>Baseline source fingerprint</dt>
+                  <dd><code>{item.baseline_evidence_fingerprint}</code></dd>
+                </div>
+                <div>
+                  <dt>Candidate source fingerprint</dt>
+                  <dd><code>{item.candidate_evidence_fingerprint}</code></dd>
+                </div>
+                <div>
+                  <dt>Imported at</dt>
+                  <dd><time dateTime={item.imported_at}>{item.imported_at}</time></dd>
+                </div>
+              </dl>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 
@@ -159,22 +322,28 @@ export default function ReleaseDecisionPanel({
   const [selectedRuleId, setSelectedRuleId] = useState("");
   const [decision, setDecision] = useState<ReleaseDecision | null>(null);
   const [history, setHistory] = useState<ReleaseDecision[]>([]);
+  const [externalEvidence, setExternalEvidence] = useState<ExternalSafetyEvidence[]>([]);
+  const [selectedEvidenceFile, setSelectedEvidenceFile] = useState<File | null>(null);
+  const [importNotice, setImportNotice] = useState<string | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isProducing, setIsProducing] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function loadWorkspace() {
     setIsLoading(true);
     setError(null);
     try {
-      const [loadedRules, loadedHistory] = await Promise.all([
+      const [loadedRules, loadedHistory, loadedEvidence] = await Promise.all([
         listReleaseRules(),
         listReleaseDecisions(evaluationRunId),
+        listExternalSafetyEvidence(evaluationRunId),
       ]);
       const latest = loadedHistory[0] ?? null;
       setRules(loadedRules);
       setHistory(loadedHistory);
+      setExternalEvidence(loadedEvidence);
       setDecision(latest);
       setSelectedRuleId(
         latest && loadedRules.some((rule) => rule.id === latest.release_rule.id)
@@ -191,8 +360,34 @@ export default function ReleaseDecisionPanel({
     }
   }
 
+  async function importEvidence() {
+    if (selectedEvidenceFile === null || isProducing || isImporting) return;
+    setIsImporting(true);
+    setError(null);
+    setImportNotice(null);
+    try {
+      const admitted = await importExternalSafetyEvidence(
+        evaluationRunId,
+        selectedEvidenceFile,
+      );
+      setExternalEvidence((current) => [
+        admitted,
+        ...current.filter((item) => item.id !== admitted.id),
+      ]);
+      setImportNotice(
+        "Evidence admitted. Produce a new Release Decision to include this snapshot.",
+      );
+    } catch (reason) {
+      setError(
+        reason instanceof Error ? reason.message : "Unable to import safety evidence.",
+      );
+    } finally {
+      setIsImporting(false);
+    }
+  }
+
   async function produceDecision() {
-    if (!selectedRuleId) return;
+    if (!selectedRuleId || isProducing || isImporting) return;
     setIsProducing(true);
     setError(null);
     try {
@@ -238,7 +433,7 @@ export default function ReleaseDecisionPanel({
               <label>
                 <span>Release Rule</span>
                 <select
-                  disabled={isProducing}
+                  disabled={isProducing || isImporting}
                   value={selectedRuleId}
                   onChange={(event) => {
                     const ruleId = event.target.value;
@@ -256,7 +451,7 @@ export default function ReleaseDecisionPanel({
               <button
                 className="primary-button"
                 type="button"
-                disabled={isProducing || !selectedRuleId}
+                disabled={isProducing || isImporting || !selectedRuleId}
                 onClick={() => void produceDecision()}
               >
                 {isProducing ? <RefreshCw className="spin" aria-hidden="true" size={16} /> : <FileCheck2 aria-hidden="true" size={16} />}
@@ -267,6 +462,15 @@ export default function ReleaseDecisionPanel({
             <p className="empty-state">No Release Rules are configured.</p>
           )}
           {selectedRule ? <ReleaseRuleSummary rule={selectedRule} /> : null}
+          <ExternalSafetyEvidenceWorkspace
+            evidence={externalEvidence}
+            selectedFile={selectedEvidenceFile}
+            isImporting={isImporting}
+            isBusy={isImporting || isProducing}
+            importNotice={importNotice}
+            onFileChange={setSelectedEvidenceFile}
+            onImport={() => void importEvidence()}
+          />
           {decision ? (
             <ReleaseDecisionResult decision={decision} />
           ) : rules.length > 0 ? (

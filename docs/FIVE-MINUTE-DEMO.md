@@ -121,6 +121,26 @@ deterministic rules   semantic judge
       versioned Rule → immutable Decision
 ```
 
+## Optional cross-project safety evidence bridge
+
+After the Evaluation Run completes, choose **Load Release Decision** and select this sanitized
+report exported through the public Agent Incident Replay Lab file contract:
+
+```text
+backend\tests\fixtures\agent-incident-validation-report.json
+```
+
+Choose **Import safety evidence**. Show the source product and schema, Candidate verdict,
+divergence summary, local content digest, and both source fingerprints. State the trust boundary
+accurately: the local digest supports duplicate/content-integrity comparison; the source
+fingerprints are producer claims, not signatures or independently re-scored proof.
+
+Produce the Release Decision after the import. The included report has an `effective` Candidate
+verdict, so **External safety** is positive, but the local release-blocking regression and failed
+Human Review still keep the overall result at **Fail**. The new fingerprint creates another
+immutable snapshot; the earlier decision is not rewritten. This file-only bridge requires no
+running Agent process, shared database, network request, model, or paid API.
+
 ## Manual Ollama variation
 
 This variation is optional and is not part of deterministic acceptance. LLM Eval Lab never
