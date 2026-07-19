@@ -16,6 +16,7 @@ from llm_eval_lab.models import (
     DeterministicEvaluation,
     EvaluationRun,
     EvaluationSuite,
+    ExternalSafetyEvidence,
     TestCaseExecution,
 )
 from llm_eval_lab.schemas import EvaluationRunCreate, EvaluationRunRead
@@ -57,6 +58,22 @@ def _evaluation_run_statement():
 
 def load_evaluation_run(session: Session, run_id: str) -> EvaluationRun | None:
     statement = _evaluation_run_statement().where(EvaluationRun.id == run_id)
+    return session.scalar(statement)
+
+
+def load_evaluation_run_for_release(
+    session: Session,
+    run_id: str,
+) -> EvaluationRun | None:
+    statement = (
+        _evaluation_run_statement()
+        .options(
+            selectinload(EvaluationRun.external_safety_evidence).defer(
+                ExternalSafetyEvidence.canonical_json
+            )
+        )
+        .where(EvaluationRun.id == run_id)
+    )
     return session.scalar(statement)
 
 

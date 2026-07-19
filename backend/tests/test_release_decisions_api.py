@@ -7,12 +7,16 @@ from pathlib import Path
 import pytest
 from dotenv import load_dotenv
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import inspect, select
 
 load_dotenv(Path(__file__).parents[2] / ".env")
 os.environ["DATABASE_URL"] = os.environ["TEST_DATABASE_URL"]
 
 from llm_eval_lab.database import Base, SessionLocal, engine
+from llm_eval_lab.evaluation_runs import (
+    load_evaluation_run,
+    load_evaluation_run_for_release,
+)
 from llm_eval_lab.main import app
 from llm_eval_lab.models import (
     ApplicationVersion,
@@ -20,6 +24,7 @@ from llm_eval_lab.models import (
     DeterministicEvaluation,
     EvaluationRun,
     EvaluationSuite,
+    ExternalSafetyEvidence,
     HumanReviewItem,
     ReleaseRule,
     SemanticEvaluation,
@@ -149,6 +154,205 @@ def release_rule_payload() -> dict[str, object]:
     }
 
 
+def add_external_safety_evidence(
+    run_id: str,
+    candidate_verdict: str,
+    digest_character: str,
+) -> str:
+    with SessionLocal() as session:
+        evidence = ExternalSafetyEvidence(
+            evaluation_run_id=run_id,
+            source_product="agent_incident_replay_lab",
+            integration_contract="validation_report_json_file_only",
+            schema_version="1.0",
+            source_digest=digest_character * 64,
+            source_bundle_id="support-ticket-exfiltration-v1",
+            source_pair_id=f"pair-{digest_character}",
+            baseline_agent_version_id="baseline-agent-v1",
+            candidate_agent_version_id="candidate-agent-v1",
+            baseline_evidence_fingerprint="b" * 64,
+            candidate_evidence_fingerprint="c" * 64,
+            baseline_verdict="ineffective",
+            candidate_verdict=candidate_verdict,
+            divergence_summary="Candidate behavior diverged at the protected action.",
+            canonical_json="{}",
+        )
+        session.add(evidence)
+        session.commit()
+        return evidence.id
+
+
+def test_only_release_loader_fetches_external_evidence_summary():
+    run_id = seed_clean_completed_run()
+    add_external_safety_evidence(run_id, "effective", "a")
+
+    with SessionLocal() as session:
+        ordinary_run = load_evaluation_run(session, run_id)
+        assert ordinary_run is not None
+        assert "external_safety_evidence" in inspect(ordinary_run).unloaded
+
+        release_run = load_evaluation_run_for_release(session, run_id)
+        assert release_run is not None
+        assert "external_safety_evidence" not in inspect(release_run).unloaded
+        assert len(release_run.external_safety_evidence) == 1
+        assert "canonical_json" in inspect(
+            release_run.external_safety_evidence[0]
+        ).unloaded
+
+
+def test_ineffective_external_safety_evidence_creates_a_new_failed_snapshot():
+    run_id = seed_clean_completed_run()
+
+    with TestClient(app) as client:
+        rule = client.post("/api/release-rules", json=release_rule_payload()).json()
+        initial_response = client.post(
+            "/api/release-decisions",
+            json={"evaluation_run_id": run_id, "release_rule_id": rule["id"]},
+        )
+
+    evidence_id = add_external_safety_evidence(run_id, "ineffective", "a")
+
+    with TestClient(app) as client:
+        revised_response = client.post(
+            "/api/release-decisions",
+            json={"evaluation_run_id": run_id, "release_rule_id": rule["id"]},
+        )
+        history = client.get(
+            "/api/release-decisions",
+            params={"evaluation_run_id": run_id},
+        ).json()
+
+    assert initial_response.status_code == 201
+    assert revised_response.status_code == 201
+    initial = initial_response.json()
+    revised = revised_response.json()
+    assert initial["outcome"] == "pass"
+    assert revised["outcome"] == "fail"
+    assert revised["evidence_fingerprint"] != initial["evidence_fingerprint"]
+    assert {decision["id"] for decision in history} == {initial["id"], revised["id"]}
+    assert revised["metrics"]["external_safety"]["status"] == "fail"
+    assert revised["metrics"]["external_safety"]["record_count"] == 1
+    assert revised["metrics"]["external_safety"]["records"][0] == {
+        "id": evidence_id,
+        "source_product": "agent_incident_replay_lab",
+        "integration_contract": "validation_report_json_file_only",
+        "schema_version": "1.0",
+        "source_digest": "a" * 64,
+        "source_bundle_id": "support-ticket-exfiltration-v1",
+        "source_pair_id": "pair-a",
+        "baseline_agent_version_id": "baseline-agent-v1",
+        "candidate_agent_version_id": "candidate-agent-v1",
+        "baseline_evidence_fingerprint": "b" * 64,
+        "candidate_evidence_fingerprint": "c" * 64,
+        "baseline_verdict": "ineffective",
+        "candidate_verdict": "ineffective",
+        "divergence_summary": "Candidate behavior diverged at the protected action.",
+    }
+    assert revised["reasons"] == [
+        {
+            "code": "external_safety_evidence_ineffective",
+            "message": "External Safety Evidence found an ineffective Candidate.",
+            "execution_ids": [],
+            "observed": [evidence_id],
+            "threshold": "effective",
+        }
+    ]
+
+
+def test_inconclusive_external_safety_evidence_requires_manual_review():
+    run_id = seed_clean_completed_run()
+    evidence_id = add_external_safety_evidence(run_id, "inconclusive", "d")
+
+    with TestClient(app) as client:
+        rule = client.post("/api/release-rules", json=release_rule_payload()).json()
+        response = client.post(
+            "/api/release-decisions",
+            json={"evaluation_run_id": run_id, "release_rule_id": rule["id"]},
+        )
+
+    assert response.status_code == 201
+    decision = response.json()
+    assert decision["outcome"] == "manual_review_required"
+    assert decision["metrics"]["external_safety"]["status"] == (
+        "manual_review_required"
+    )
+    assert decision["reasons"] == [
+        {
+            "code": "external_safety_evidence_inconclusive",
+            "message": "External Safety Evidence is inconclusive.",
+            "execution_ids": [],
+            "observed": [evidence_id],
+            "threshold": "effective",
+        }
+    ]
+
+
+def test_effective_external_evidence_is_positive_but_cannot_override_local_failure():
+    run_id = seed_clean_completed_run()
+    add_external_safety_evidence(run_id, "effective", "d")
+    with SessionLocal() as session:
+        candidate = session.scalar(
+            select(EvaluationTestCaseExecution).where(
+                EvaluationTestCaseExecution.evaluation_run_id == run_id,
+                EvaluationTestCaseExecution.version_role == "candidate",
+            )
+        )
+        assert candidate is not None
+        candidate.test_case.severity = "release_blocking"
+        evaluation = candidate.deterministic_evaluation
+        assert evaluation is not None
+        evaluation.passed = False
+        evaluation.outcomes[1].passed = False
+        evaluation.outcomes[1].matched_evidence = "Unsafe claim."
+        session.commit()
+
+    with TestClient(app) as client:
+        rule = client.post("/api/release-rules", json=release_rule_payload()).json()
+        response = client.post(
+            "/api/release-decisions",
+            json={"evaluation_run_id": run_id, "release_rule_id": rule["id"]},
+        )
+
+    decision = response.json()
+    assert decision["outcome"] == "fail"
+    assert decision["metrics"]["external_safety"]["status"] == "pass"
+    assert decision["metrics"]["external_safety"]["record_count"] == 1
+    assert decision["metrics"]["external_safety"]["records"][0][
+        "candidate_verdict"
+    ] == "effective"
+    assert "release_blocking_failure" in {
+        reason["code"] for reason in decision["reasons"]
+    }
+
+
+def test_worst_external_candidate_verdict_governs_the_metric():
+    run_id = seed_clean_completed_run()
+    add_external_safety_evidence(run_id, "effective", "d")
+    add_external_safety_evidence(run_id, "inconclusive", "e")
+    ineffective_id = add_external_safety_evidence(run_id, "ineffective", "f")
+
+    with TestClient(app) as client:
+        rule = client.post("/api/release-rules", json=release_rule_payload()).json()
+        response = client.post(
+            "/api/release-decisions",
+            json={"evaluation_run_id": run_id, "release_rule_id": rule["id"]},
+        )
+
+    decision = response.json()
+    assert decision["outcome"] == "fail"
+    assert decision["metrics"]["external_safety"]["status"] == "fail"
+    assert decision["metrics"]["external_safety"]["record_count"] == 3
+    assert decision["reasons"] == [
+        {
+            "code": "external_safety_evidence_ineffective",
+            "message": "External Safety Evidence found an ineffective Candidate.",
+            "execution_ids": [],
+            "observed": [ineffective_id],
+            "threshold": "effective",
+        }
+    ]
+
+
 def test_evidence_fingerprint_is_stable_when_test_case_positions_tie():
     run_id = seed_clean_completed_run()
     with SessionLocal() as session:
@@ -226,6 +430,11 @@ def test_clean_run_at_threshold_boundaries_produces_one_reproducible_pass_decisi
             "candidate_total_usd": 0.02,
             "maximum_candidate_total_usd": 0.02,
             "status": "pass",
+        },
+        "external_safety": {
+            "status": "not_present",
+            "record_count": 0,
+            "records": [],
         },
     }
     assert len(decision["evidence_fingerprint"]) == 64

@@ -24,6 +24,32 @@ export interface ReleaseDecisionReason {
   threshold: unknown;
 }
 
+export type ExternalSafetyVerdict = "effective" | "ineffective" | "inconclusive";
+
+export interface ExternalSafetyEvidence {
+  id: string;
+  evaluation_run_id: string;
+  source_product: string;
+  integration_contract: string;
+  schema_version: string;
+  source_digest: string;
+  source_bundle_id: string;
+  source_pair_id: string;
+  baseline_agent_version_id: string;
+  candidate_agent_version_id: string;
+  baseline_evidence_fingerprint: string;
+  candidate_evidence_fingerprint: string;
+  baseline_verdict: ExternalSafetyVerdict;
+  candidate_verdict: ExternalSafetyVerdict;
+  divergence_summary: string;
+  imported_at: string;
+}
+
+type ExternalSafetySnapshotRecord = Omit<
+  ExternalSafetyEvidence,
+  "evaluation_run_id" | "imported_at"
+>;
+
 interface RateMetric {
   baseline_rate: number;
   candidate_rate: number;
@@ -50,6 +76,11 @@ export interface ReleaseDecision {
       candidate_total_usd: number | null;
       maximum_candidate_total_usd: number | null;
       status: "pass" | "fail" | "unavailable" | "not_configured";
+    };
+    external_safety?: {
+      status: "pass" | "fail" | "manual_review_required" | "not_present";
+      record_count: number;
+      records: ExternalSafetySnapshotRecord[];
     };
   };
   evidence_fingerprint: string;
@@ -94,5 +125,44 @@ export async function createReleaseDecision(
         release_rule_id: releaseRuleId,
       }),
     }),
+  );
+}
+
+export async function listExternalSafetyEvidence(
+  evaluationRunId: string,
+): Promise<ExternalSafetyEvidence[]> {
+  return readResponse<ExternalSafetyEvidence[]>(
+    await fetch(
+      `/api/evaluation-runs/${evaluationRunId}/external-safety-evidence`,
+    ),
+  );
+}
+
+function readFileBytes(file: File): Promise<ArrayBuffer> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener("load", () => {
+      if (reader.result instanceof ArrayBuffer) resolve(reader.result);
+      else reject(new Error("Unable to read the selected file."));
+    });
+    reader.addEventListener("error", () => reject(new Error("Unable to read the selected file.")));
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+export async function importExternalSafetyEvidence(
+  evaluationRunId: string,
+  file: File,
+): Promise<ExternalSafetyEvidence> {
+  const reportBytes = await readFileBytes(file);
+  return readResponse<ExternalSafetyEvidence>(
+    await fetch(
+      `/api/evaluation-runs/${evaluationRunId}/external-safety-evidence`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: reportBytes,
+      },
+    ),
   );
 }

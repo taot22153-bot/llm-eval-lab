@@ -580,6 +580,61 @@ const failedReleaseDecision = {
   created_at: "2026-07-15T00:06:00Z",
 };
 
+const externalSafetyEvidence = {
+  id: "external-evidence-01",
+  evaluation_run_id: scoredEvaluationRun.id,
+  source_product: "agent_incident_replay_lab",
+  integration_contract: "validation_report_json_file_only",
+  schema_version: "1.0",
+  source_digest: "a".repeat(64),
+  source_bundle_id: "support-ticket-exfiltration-v1",
+  source_pair_id: "vp-demo-01",
+  baseline_agent_version_id: "baseline-agent-v1",
+  candidate_agent_version_id: "candidate-agent-v2",
+  baseline_evidence_fingerprint: "b".repeat(64),
+  candidate_evidence_fingerprint: "c".repeat(64),
+  baseline_verdict: "ineffective",
+  candidate_verdict: "ineffective",
+  divergence_summary: "Candidate still permitted the protected external action.",
+  imported_at: "2026-07-19T01:00:00Z",
+};
+
+const effectiveExternalSafetyEvidence = {
+  ...externalSafetyEvidence,
+  id: "external-evidence-effective-01",
+  source_digest: "e".repeat(64),
+  source_pair_id: "vp-demo-effective-01",
+  baseline_evidence_fingerprint: "f".repeat(64),
+  candidate_evidence_fingerprint: "1".repeat(64),
+  baseline_verdict: "ineffective",
+  candidate_verdict: "effective",
+  divergence_summary: "Candidate blocked the protected external action.",
+  imported_at: "2026-07-19T00:30:00Z",
+};
+
+const externalFailedReleaseDecision = {
+  ...failedReleaseDecision,
+  id: "release-decision-external-01",
+  reasons: [
+    {
+      code: "external_safety_evidence_ineffective",
+      message: "External Safety Evidence found an ineffective Candidate.",
+      execution_ids: [],
+      observed: [externalSafetyEvidence.id],
+      threshold: "effective",
+    },
+  ],
+  metrics: {
+    ...failedReleaseDecision.metrics,
+    external_safety: {
+      status: "fail",
+      record_count: 1,
+      records: [externalSafetyEvidence],
+    },
+  },
+  evidence_fingerprint: "d".repeat(64),
+};
+
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -992,6 +1047,7 @@ describe("Application Versions", () => {
       .mockResolvedValueOnce(jsonResponse(pendingReviewItems))
       .mockResolvedValueOnce(jsonResponse([defaultReleaseRule]))
       .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse([]))
       .mockResolvedValueOnce(jsonResponse(failedReleaseDecision, 201));
 
     render(<App />);
@@ -1050,7 +1106,8 @@ describe("Application Versions", () => {
       "href",
       "#execution-02-execution",
     );
-    expect(fetchMock).toHaveBeenNthCalledWith(7, "/api/release-decisions", {
+    expect(within(panel).getByText("0 admitted reports")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenNthCalledWith(8, "/api/release-decisions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -1058,6 +1115,151 @@ describe("Application Versions", () => {
         release_rule_id: defaultReleaseRule.id,
       }),
     });
+  });
+
+  it("imports an Agent Validation Report and uses it in the next Release Decision", async () => {
+    const user = userEvent.setup();
+    const reportJson = JSON.stringify({
+      schema_version: "1.0",
+      integration_contract: "validation_report_json_file_only",
+    });
+    fetchMock
+      .mockReset()
+      .mockResolvedValueOnce(jsonResponse([createdVersion, candidateVersion]))
+      .mockResolvedValueOnce(jsonResponse([sampleSuiteSummary]))
+      .mockResolvedValueOnce(jsonResponse([scoredEvaluationRun]))
+      .mockResolvedValueOnce(jsonResponse(pendingReviewItems))
+      .mockResolvedValueOnce(jsonResponse([defaultReleaseRule]))
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse([effectiveExternalSafetyEvidence]))
+      .mockResolvedValueOnce(jsonResponse(externalSafetyEvidence, 201))
+      .mockResolvedValueOnce(jsonResponse(externalFailedReleaseDecision, 201));
+
+    render(<App />);
+    expect(await screen.findByText(createdVersion.name)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Evaluation Runs" }));
+    const panel = await screen.findByRole("region", { name: "Release Decision" });
+    await user.click(
+      within(panel).getByRole("button", { name: "Load Release Decision" }),
+    );
+
+    expect(await within(panel).findByText("1 admitted")).toBeInTheDocument();
+    const reportFile = new File([reportJson], "validation-report.json", {
+      type: "application/json",
+    });
+    await user.upload(within(panel).getByLabelText("Validation Report JSON"), reportFile);
+    await user.click(
+      within(panel).getByRole("button", { name: "Import safety evidence" }),
+    );
+
+    const candidateVerdict = await within(panel).findByText("Candidate ineffective");
+    expect(candidateVerdict).toBeInTheDocument();
+    const ineffectiveCard = candidateVerdict.closest("li");
+    expect(ineffectiveCard).toHaveClass(
+      "external-safety-card--ineffective",
+    );
+    expect(ineffectiveCard).toHaveAttribute(
+      "id",
+      `external-safety-evidence-${externalSafetyEvidence.id}`,
+    );
+    expect(within(ineffectiveCard as HTMLElement).getByText(externalSafetyEvidence.id))
+      .toBeInTheDocument();
+    expect(within(ineffectiveCard as HTMLElement).getByText("agent_incident_replay_lab"))
+      .toBeInTheDocument();
+    expect(within(ineffectiveCard as HTMLElement).getByText("baseline-agent-v1"))
+      .toBeInTheDocument();
+    expect(within(ineffectiveCard as HTMLElement).getByText("candidate-agent-v2"))
+      .toBeInTheDocument();
+    expect(
+      within(ineffectiveCard as HTMLElement).getByText(
+        "Baseline ineffective / Candidate ineffective",
+      ),
+    ).toBeInTheDocument();
+    expect(within(ineffectiveCard as HTMLElement).getByText("validation_report_json_file_only"))
+      .toBeInTheDocument();
+    expect(within(ineffectiveCard as HTMLElement).getByText(externalSafetyEvidence.source_digest))
+      .toBeInTheDocument();
+    expect(
+      within(ineffectiveCard as HTMLElement).getByText(
+        externalSafetyEvidence.candidate_evidence_fingerprint,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(panel).getByText(
+        "Content digest only; source fingerprints are producer claims, not signatures.",
+      ),
+    ).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      8,
+      `/api/evaluation-runs/${scoredEvaluationRun.id}/external-safety-evidence`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: expect.any(ArrayBuffer),
+      },
+    );
+    const importBody = fetchMock.mock.calls[7]?.[1]?.body;
+    expect(importBody).toBeInstanceOf(ArrayBuffer);
+    expect(new TextDecoder().decode(importBody as ArrayBuffer)).toBe(reportJson);
+
+    await user.click(
+      within(panel).getByRole("button", { name: "Produce Release Decision" }),
+    );
+    expect(await within(panel).findByRole("heading", { name: "Fail" }))
+      .toBeInTheDocument();
+    expect(
+      within(panel).getByText("External Safety Evidence found an ineffective Candidate."),
+    ).toBeInTheDocument();
+    expect(within(panel).getByRole("link", { name: "External evidence" })).toHaveAttribute(
+      "href",
+      `#external-safety-evidence-${externalSafetyEvidence.id}`,
+    );
+    expect(within(panel).getByText("1 admitted report")).toBeInTheDocument();
+    expect(within(panel).getByText("2 admitted")).toBeInTheDocument();
+  });
+
+  it("shows a sanitized external evidence admission error", async () => {
+    const user = userEvent.setup();
+    fetchMock
+      .mockReset()
+      .mockResolvedValueOnce(jsonResponse([createdVersion, candidateVersion]))
+      .mockResolvedValueOnce(jsonResponse([sampleSuiteSummary]))
+      .mockResolvedValueOnce(jsonResponse([scoredEvaluationRun]))
+      .mockResolvedValueOnce(jsonResponse(pendingReviewItems))
+      .mockResolvedValueOnce(jsonResponse([defaultReleaseRule]))
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(
+        jsonResponse(
+          { detail: "The file is not a supported Validation Report." },
+          422,
+        ),
+      );
+
+    render(<App />);
+    expect(await screen.findByText(createdVersion.name)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Evaluation Runs" }));
+    const panel = await screen.findByRole("region", { name: "Release Decision" });
+    await user.click(
+      within(panel).getByRole("button", { name: "Load Release Decision" }),
+    );
+    await user.upload(
+      within(panel).getByLabelText("Validation Report JSON"),
+      new File(["hostile rejected payload"], "invalid.json", {
+        type: "application/json",
+      }),
+    );
+    await user.click(
+      within(panel).getByRole("button", { name: "Import safety evidence" }),
+    );
+
+    expect(await within(panel).findByRole("alert")).toHaveTextContent(
+      "The file is not a supported Validation Report.",
+    );
+    expect(within(panel).queryByText("hostile rejected payload"))
+      .not.toBeInTheDocument();
+    expect(within(panel).getByText("No external safety evidence admitted."))
+      .toBeInTheDocument();
   });
 
   it("clears a loaded Release Decision when review navigation selects another run", async () => {
@@ -1070,6 +1272,7 @@ describe("Application Versions", () => {
       .mockResolvedValueOnce(jsonResponse([historicalReviewItem]))
       .mockResolvedValueOnce(jsonResponse([defaultReleaseRule]))
       .mockResolvedValueOnce(jsonResponse([failedReleaseDecision]))
+      .mockResolvedValueOnce(jsonResponse([]))
       .mockResolvedValueOnce(jsonResponse(historicalReviewDetail))
       .mockResolvedValueOnce(jsonResponse(historicalEvaluationRun));
 
@@ -1113,6 +1316,7 @@ describe("Application Versions", () => {
       .mockResolvedValueOnce(jsonResponse(pendingReviewItems))
       .mockResolvedValueOnce(jsonResponse([defaultReleaseRule]))
       .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse([]))
       .mockReturnValueOnce(delayedDecision);
 
     render(<App />);
@@ -1124,14 +1328,27 @@ describe("Application Versions", () => {
       within(panel).getByRole("button", { name: "Load Release Decision" }),
     );
     const ruleSelector = await within(panel).findByLabelText("Release Rule");
+    const evidenceInput = within(panel).getByLabelText("Validation Report JSON");
+    await user.upload(
+      evidenceInput,
+      new File(["{}"], "validation-report.json", { type: "application/json" }),
+    );
+    const importButton = within(panel).getByRole("button", {
+      name: "Import safety evidence",
+    });
+    expect(importButton).toBeEnabled();
     await user.click(
       within(panel).getByRole("button", { name: "Produce Release Decision" }),
     );
 
     expect(ruleSelector).toBeDisabled();
+    expect(evidenceInput).toBeDisabled();
+    expect(importButton).toBeDisabled();
     resolveDecision?.(jsonResponse(failedReleaseDecision, 201));
     expect(await within(panel).findByRole("heading", { name: "Fail" })).toBeInTheDocument();
     expect(ruleSelector).toBeEnabled();
+    expect(evidenceInput).toBeEnabled();
+    expect(importButton).toBeEnabled();
   });
 
   it("separates semantic judgment from deterministic evidence and exposes the review queue", async () => {

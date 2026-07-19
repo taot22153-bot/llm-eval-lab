@@ -15,6 +15,7 @@ load_dotenv(PROJECT_ROOT / ".env")
 def reset_schema(engine) -> None:
     with engine.begin() as connection:
         for table in (
+            "external_safety_evidence",
             "release_decisions",
             "release_rules",
             "human_review_items",
@@ -366,6 +367,49 @@ def test_migration_creates_versioned_release_rules_and_immutable_decisions():
     table_names = inspect(engine).get_table_names()
     assert "release_rules" not in table_names
     assert "release_decisions" not in table_names
+
+
+def test_migration_creates_immutable_external_safety_evidence():
+    database_url = os.environ["TEST_DATABASE_URL"]
+    config = Config(BACKEND_ROOT / "alembic.ini")
+    config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
+    engine = create_engine(database_url)
+    reset_schema(engine)
+
+    command.upgrade(config, "head")
+
+    inspector = inspect(engine)
+    assert {column["name"] for column in inspector.get_columns(
+        "external_safety_evidence"
+    )} == {
+        "id",
+        "evaluation_run_id",
+        "source_product",
+        "integration_contract",
+        "schema_version",
+        "source_digest",
+        "source_bundle_id",
+        "source_pair_id",
+        "baseline_agent_version_id",
+        "candidate_agent_version_id",
+        "baseline_evidence_fingerprint",
+        "candidate_evidence_fingerprint",
+        "baseline_verdict",
+        "candidate_verdict",
+        "divergence_summary",
+        "canonical_json",
+        "imported_at",
+    }
+    assert {
+        constraint["name"]
+        for constraint in inspector.get_unique_constraints("external_safety_evidence")
+    } >= {"uq_external_safety_evidence_run_digest"}
+    assert inspector.get_foreign_keys("external_safety_evidence")[0][
+        "referred_table"
+    ] == "evaluation_runs"
+
+    command.downgrade(config, "base")
+    assert "external_safety_evidence" not in inspect(engine).get_table_names()
 
 
 def test_migration_backfills_existing_responses_and_regression_classification():

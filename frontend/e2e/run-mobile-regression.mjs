@@ -22,7 +22,20 @@ const repositoryPlaywrightState = path.join(frontendRoot, ".playwright-cli");
 const browserProgramTemplate = path.join(frontendRoot, "e2e", "mobile-evaluation-runs.js");
 const browserArtifactDirectory = path.resolve(frontendRoot, "..", "output", "playwright");
 const browserArtifactPlaceholder = '"__LLM_EVAL_LAB_PLAYWRIGHT_OUTPUT_DIR__"';
-const browserArtifacts = ["demo-human-review.png", "demo-release-decision.png"].map(
+const validationReportPlaceholder = '"__LLM_EVAL_LAB_VALIDATION_REPORT_PATH__"';
+const validationReportPath = path.resolve(
+  frontendRoot,
+  "..",
+  "backend",
+  "tests",
+  "fixtures",
+  "agent-incident-validation-report.json",
+);
+const browserArtifacts = [
+  "demo-external-safety-mobile.png",
+  "demo-human-review.png",
+  "demo-release-decision.png",
+].map(
   (fileName) => path.join(browserArtifactDirectory, fileName),
 );
 const trackedDocumentationScreenshots = [
@@ -129,10 +142,18 @@ async function writeConfiguredBrowserProgram(workspace) {
   ) {
     throw new Error("Browser program must contain exactly one artifact-directory placeholder.");
   }
-  const configuredProgram = template.replace(
-    browserArtifactPlaceholder,
-    JSON.stringify(browserArtifactDirectory),
-  );
+  if (
+    !template.includes(validationReportPlaceholder)
+    || template.indexOf(validationReportPlaceholder)
+      !== template.lastIndexOf(validationReportPlaceholder)
+  ) {
+    throw new Error(
+      "Browser program must contain exactly one Validation Report placeholder.",
+    );
+  }
+  const configuredProgram = template
+    .replace(browserArtifactPlaceholder, JSON.stringify(browserArtifactDirectory))
+    .replace(validationReportPlaceholder, JSON.stringify(validationReportPath));
   const configuredProgramPath = path.join(workspace, "mobile-evaluation-runs.js");
   await writeFile(configuredProgramPath, configuredProgram, "utf8");
   return configuredProgramPath;

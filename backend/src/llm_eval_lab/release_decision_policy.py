@@ -5,7 +5,12 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from llm_eval_lab.models import EvaluationRun, ReleaseRule, TestCaseExecution
+from llm_eval_lab.models import (
+    EvaluationRun,
+    ExternalSafetyEvidence,
+    ReleaseRule,
+    TestCaseExecution,
+)
 
 
 @dataclass(frozen=True)
@@ -65,6 +70,49 @@ def _status(observed: float | None, threshold: float | int | None, passes: bool)
     if observed is None:
         return "unavailable"
     return "pass" if passes else "fail"
+
+
+def _external_safety_record(evidence: ExternalSafetyEvidence) -> dict[str, Any]:
+    return {
+        "id": evidence.id,
+        "source_product": evidence.source_product,
+        "integration_contract": evidence.integration_contract,
+        "schema_version": evidence.schema_version,
+        "source_digest": evidence.source_digest,
+        "source_bundle_id": evidence.source_bundle_id,
+        "source_pair_id": evidence.source_pair_id,
+        "baseline_agent_version_id": evidence.baseline_agent_version_id,
+        "candidate_agent_version_id": evidence.candidate_agent_version_id,
+        "baseline_evidence_fingerprint": evidence.baseline_evidence_fingerprint,
+        "candidate_evidence_fingerprint": evidence.candidate_evidence_fingerprint,
+        "baseline_verdict": evidence.baseline_verdict,
+        "candidate_verdict": evidence.candidate_verdict,
+        "divergence_summary": evidence.divergence_summary,
+    }
+
+
+def _external_safety_metric(evaluation_run: EvaluationRun) -> dict[str, Any]:
+    records = [
+        _external_safety_record(evidence)
+        for evidence in sorted(
+            evaluation_run.external_safety_evidence,
+            key=lambda item: (item.source_digest, item.id),
+        )
+    ]
+    verdicts = {record["candidate_verdict"] for record in records}
+    if "ineffective" in verdicts:
+        metric_status = "fail"
+    elif "inconclusive" in verdicts:
+        metric_status = "manual_review_required"
+    elif records:
+        metric_status = "pass"
+    else:
+        metric_status = "not_present"
+    return {
+        "status": metric_status,
+        "record_count": len(records),
+        "records": records,
+    }
 
 
 def _evidence_fingerprint(evaluation_run: EvaluationRun, release_rule: ReleaseRule) -> str:
@@ -165,6 +213,9 @@ def _evidence_fingerprint(evaluation_run: EvaluationRun, release_rule: ReleaseRu
             )
         ],
     }
+    external_safety = _external_safety_metric(evaluation_run)
+    if external_safety["records"]:
+        snapshot["external_safety"] = external_safety
     encoded = json.dumps(snapshot, sort_keys=True, separators=(",", ":")).encode()
     return hashlib.sha256(encoded).hexdigest()
 
@@ -240,8 +291,24 @@ def evaluate_release(
                 ),
             ),
         },
+        "external_safety": _external_safety_metric(evaluation_run),
     }
+    ineffective_evidence_ids = [
+        record["id"]
+        for record in metrics["external_safety"]["records"]
+        if record["candidate_verdict"] == "ineffective"
+    ]
     failure_reasons: list[dict[str, Any]] = []
+    if ineffective_evidence_ids:
+        failure_reasons.append(
+            {
+                "code": "external_safety_evidence_ineffective",
+                "message": "External Safety Evidence found an ineffective Candidate.",
+                "execution_ids": [],
+                "observed": ineffective_evidence_ids,
+                "threshold": "effective",
+            }
+        )
     for execution in candidate:
         severity = execution.test_case.severity
         review = execution.human_review_item
@@ -336,6 +403,21 @@ def evaluate_release(
             evidence_fingerprint=_evidence_fingerprint(evaluation_run, release_rule),
         )
     manual_review_reasons: list[dict[str, Any]] = []
+    inconclusive_evidence_ids = [
+        record["id"]
+        for record in metrics["external_safety"]["records"]
+        if record["candidate_verdict"] == "inconclusive"
+    ]
+    if inconclusive_evidence_ids:
+        manual_review_reasons.append(
+            {
+                "code": "external_safety_evidence_inconclusive",
+                "message": "External Safety Evidence is inconclusive.",
+                "execution_ids": [],
+                "observed": inconclusive_evidence_ids,
+                "threshold": "effective",
+            }
+        )
     for execution in evaluation_run.executions:
         if (
             execution.status == "completed"

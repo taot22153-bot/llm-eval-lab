@@ -6,7 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from llm_eval_lab.database import get_session
-from llm_eval_lab.evaluation_runs import load_evaluation_run
+from llm_eval_lab.evaluation_runs import load_evaluation_run_for_release
 from llm_eval_lab.models import ReleaseDecision, ReleaseRule
 from llm_eval_lab.release_decision_policy import evaluate_release
 from llm_eval_lab.schemas import (
@@ -77,7 +77,7 @@ def create_release_decision(
     response: Response,
     session: DatabaseSession,
 ) -> dict[str, Any]:
-    evaluation_run = load_evaluation_run(session, payload.evaluation_run_id)
+    evaluation_run = load_evaluation_run_for_release(session, payload.evaluation_run_id)
     release_rule = session.get(ReleaseRule, payload.release_rule_id)
     if evaluation_run is None or release_rule is None:
         raise HTTPException(

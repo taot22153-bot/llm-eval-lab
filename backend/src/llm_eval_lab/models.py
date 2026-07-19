@@ -17,6 +17,7 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 from sqlalchemy.dialects.mysql import DATETIME as MySQLDateTime
+from sqlalchemy.dialects.mysql import LONGTEXT as MySQLLongText
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from llm_eval_lab.database import Base
@@ -138,6 +139,56 @@ class EvaluationRun(Base):
     release_decisions: Mapped[list[ReleaseDecision]] = relationship(
         back_populates="evaluation_run",
         cascade="all, delete-orphan",
+    )
+    external_safety_evidence: Mapped[list[ExternalSafetyEvidence]] = relationship(
+        back_populates="evaluation_run",
+        cascade="all, delete-orphan",
+    )
+
+
+class ExternalSafetyEvidence(Base):
+    __tablename__ = "external_safety_evidence"
+    __table_args__ = (
+        UniqueConstraint(
+            "evaluation_run_id",
+            "source_digest",
+            name="uq_external_safety_evidence_run_digest",
+        ),
+        CheckConstraint(
+            "baseline_verdict IN ('effective', 'ineffective', 'inconclusive')",
+            name="ck_external_safety_evidence_baseline_verdict",
+        ),
+        CheckConstraint(
+            "candidate_verdict IN ('effective', 'ineffective', 'inconclusive')",
+            name="ck_external_safety_evidence_candidate_verdict",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    evaluation_run_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("evaluation_runs.id", ondelete="CASCADE"),
+    )
+    source_product: Mapped[str] = mapped_column(String(80))
+    integration_contract: Mapped[str] = mapped_column(String(80))
+    schema_version: Mapped[str] = mapped_column(String(20))
+    source_digest: Mapped[str] = mapped_column(String(64))
+    source_bundle_id: Mapped[str] = mapped_column(String(160))
+    source_pair_id: Mapped[str] = mapped_column(String(80))
+    baseline_agent_version_id: Mapped[str] = mapped_column(String(160))
+    candidate_agent_version_id: Mapped[str] = mapped_column(String(160))
+    baseline_evidence_fingerprint: Mapped[str] = mapped_column(String(64))
+    candidate_evidence_fingerprint: Mapped[str] = mapped_column(String(64))
+    baseline_verdict: Mapped[str] = mapped_column(String(24))
+    candidate_verdict: Mapped[str] = mapped_column(String(24))
+    divergence_summary: Mapped[str] = mapped_column(Text)
+    canonical_json: Mapped[str] = mapped_column(Text().with_variant(MySQLLongText, "mysql"))
+    imported_at: Mapped[datetime] = mapped_column(
+        MySQLDateTime(fsp=6),
+        default=lambda: datetime.now(UTC),
+    )
+    evaluation_run: Mapped[EvaluationRun] = relationship(
+        back_populates="external_safety_evidence"
     )
 
 
