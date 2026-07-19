@@ -221,6 +221,55 @@ def test_rejects_invalid_or_oversized_reports(body: bytes, expected_detail: str)
         assert session.query(ExternalSafetyEvidence).count() == 0
 
 
+def test_rejects_duplicate_root_json_members_without_persisting_evidence():
+    run_id = seed_run()
+    ambiguous_report = REPORT_PATH.read_bytes().replace(
+        b"{",
+        b'{"schema_version":"999",',
+        1,
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            f"/api/evaluation-runs/{run_id}/external-safety-evidence",
+            content=ambiguous_report,
+            headers={"Content-Type": "application/json"},
+        )
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "detail": "The file is not a supported Validation Report."
+    }
+    with SessionLocal() as session:
+        assert session.query(ExternalSafetyEvidence).count() == 0
+
+
+def test_rejects_duplicate_nested_json_members_without_persisting_evidence():
+    run_id = seed_run()
+    report_text = REPORT_PATH.read_text(encoding="utf-8")
+    prefix, candidate = report_text.split('  "candidate": {', 1)
+    ambiguous_candidate = candidate.replace(
+        '"status": "effective"',
+        '"status": "ineffective",\n          "status": "effective"',
+        1,
+    )
+    ambiguous_report = (prefix + '  "candidate": {' + ambiguous_candidate).encode()
+
+    with TestClient(app) as client:
+        response = client.post(
+            f"/api/evaluation-runs/{run_id}/external-safety-evidence",
+            content=ambiguous_report,
+            headers={"Content-Type": "application/json"},
+        )
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "detail": "The file is not a supported Validation Report."
+    }
+    with SessionLocal() as session:
+        assert session.query(ExternalSafetyEvidence).count() == 0
+
+
 @pytest.mark.parametrize(
     ("field", "value", "expected_detail"),
     [

@@ -341,6 +341,7 @@ def admit_report(raw: bytes) -> AdmittedReport:
         decoded = raw.decode("utf-8")
         source = json.loads(
             decoded,
+            object_pairs_hook=_reject_duplicate_object_members,
             parse_constant=_reject_nonstandard_json_constant,
             parse_float=_parse_finite_float,
         )
@@ -386,6 +387,17 @@ def admit_report(raw: bytes) -> AdmittedReport:
 
 def _reject_nonstandard_json_constant(_: str) -> None:
     raise ValueError
+
+
+def _reject_duplicate_object_members(
+    members: list[tuple[str, JsonValue]],
+) -> dict[str, JsonValue]:
+    parsed: dict[str, JsonValue] = {}
+    for name, value in members:
+        if name in parsed:
+            raise ValueError
+        parsed[name] = value
+    return parsed
 
 
 def _parse_finite_float(value: str) -> float:
