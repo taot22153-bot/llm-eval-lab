@@ -257,8 +257,13 @@ class SourceRunEvidence(StrictModel):
         normalized_terminal_events = [
             event for event in self.normalized_timeline if event.kind == "validation_verdict"
         ]
-        if len(terminal_events) != 1 or len(normalized_terminal_events) != 1:
-            raise ValueError("Validation evidence must contain one terminal verdict.")
+        if (
+            len(terminal_events) != 1
+            or len(normalized_terminal_events) != 1
+            or self.evidence_timeline[-1].kind != "validation_verdict"
+            or self.normalized_timeline[-1].kind != "validation_verdict"
+        ):
+            raise ValueError("Validation evidence must end with one terminal verdict.")
         terminal_verdict = SourceValidationVerdict.model_validate(terminal_events[0].content)
         normalized_verdict = SourceValidationVerdict.model_validate(
             normalized_terminal_events[0].content

@@ -270,6 +270,49 @@ def test_rejects_duplicate_nested_json_members_without_persisting_evidence():
         assert session.query(ExternalSafetyEvidence).count() == 0
 
 
+def test_rejects_events_after_the_terminal_validation_verdict():
+    run_id = seed_run()
+    report = json.loads(REPORT_PATH.read_bytes())
+    candidate = report["candidate"]
+    candidate["evidence_timeline"].append(
+        {
+            "sequence": len(candidate["evidence_timeline"]) + 1,
+            "kind": "task_outcome",
+            "causal_id": "post-verdict-event",
+            "caused_by": [],
+            "content": {
+                "status": "completed",
+                "summary": "Occurred after the declared terminal verdict.",
+            },
+        }
+    )
+    candidate["normalized_timeline"].append(
+        {
+            "alignment_key": "post-verdict-event",
+            "kind": "task_outcome",
+            "causal_role": "post_verdict",
+            "caused_by": [],
+            "content": {
+                "status": "completed",
+                "summary": "Occurred after the declared terminal verdict.",
+            },
+        }
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            f"/api/evaluation-runs/{run_id}/external-safety-evidence",
+            json=report,
+        )
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "detail": "The file is not a supported Validation Report."
+    }
+    with SessionLocal() as session:
+        assert session.query(ExternalSafetyEvidence).count() == 0
+
+
 @pytest.mark.parametrize(
     ("field", "value", "expected_detail"),
     [
